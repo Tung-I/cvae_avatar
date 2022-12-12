@@ -16,7 +16,7 @@ from data.dataset.utils import *
 
 
 individual = 'm--20181017--0000--002914589--GHS'
-# cam_valid = ['400013', '400042', '400060']
+cam_not_use = ['400008', '400006', '400010', '400031', '400055', '400059', '400025']
 
 
 class MFINDDataset(BaseDataset):
@@ -65,7 +65,8 @@ class MFINDDataset(BaseDataset):
                 for i, cam in enumerate(self.cameras):
                     path = "{}/{}/{}/{}.png".format(self.uvpath, ep, cam, n)
                     if os.path.isfile(path) is True:
-                        self.framelist.append((ep, cam, n))
+                        if cam not in cam_not_use:
+                            self.framelist.append((ep, cam, n))
 
                 # for i, cam in enumerate(self.cameras):
                 #     path = "{}/{}/{}/{}.png".format(self.uvpath, ep, cam, n)
@@ -106,7 +107,7 @@ class MFINDDataset(BaseDataset):
         # sampling for validation and debugging
         if self.type=='valid':
             random.seed(0)
-            self.framelist = random.sample(self.framelist, 400)
+            self.framelist = random.sample(self.framelist, 1000)
         if self.debug:
             self.framelist = random.sample(self.framelist, 40)
 
