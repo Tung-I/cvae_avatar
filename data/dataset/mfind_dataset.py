@@ -8,9 +8,11 @@ import torch
 import json
 import random
 import sys
+from pathlib import Path
+from PIL import Image
 
-from base_dataset import BaseDataset
-from utils import *
+from data.dataset import BaseDataset
+from data.dataset.utils import *
 
 
 individual = 'm--20181017--0000--002914589--GHS'
@@ -89,14 +91,8 @@ class MFINDDataset(BaseDataset):
             Image.open("{}/tex_mean.png".format(self.base_dir)), dtype=np.float32
         )
         self.texmean = np.copy(np.flip(texmean, 0))
+        self.texmean = cv2.resize(self.texmean, (self.tex_size, self.tex_size))
         self.texstd = float(np.genfromtxt("{}/tex_var.txt".format(self.base_dir)) ** 0.5)
-        # self.texmin = (
-        #     np.zeros_like(self.texmean, dtype=np.float32) - self.texmean
-        # ) / self.texstd
-        # self.texmax = (
-        #     np.ones_like(self.texmean, dtype=np.float32) * 255 - self.texmean
-        # ) / self.texstd
-
         self.vertmean = np.fromfile(
             "{}/vert_mean.bin".format(self.base_dir), dtype=np.float32
         )
@@ -104,13 +100,8 @@ class MFINDDataset(BaseDataset):
 
         # weight mask
         self.loss_weight_mask = cv2.flip(cv2.imread(self.maskpath), 0)
-
-        # resize and to_tensor
-        self.texmean = cv2.resize(self.texmean, (self.tex_size, self.tex_size))
-        self.texmean = torch.tensor(self.texmean).permute((2, 0, 1))[None, ...]
-        self.vertmean = torch.tensor(self.vertmean, dtype=torch.float32).view((1, -1, 3))
         self.loss_weight_mask = self.loss_weight_mask / self.loss_weight_mask.max()
-        self.loss_weight_mask = torch.tensor(self.loss_weight_mask).permute(2, 0, 1).unsqueeze(0).float()
+        
             
         # sampling for validation and debugging
         if self.type=='valid':
@@ -129,10 +120,9 @@ class MFINDDataset(BaseDataset):
         cam_id = self.camera_ids[cam]
 
         # geometry
-        if self.mesh_topology is None:
-            path = "{}/{}/{}.obj".format(self.meshpath, ep, frame)
-            obj = load_obj(path)
-            self.mesh_topology = obj
+        path = "{}/{}/{}.obj".format(self.meshpath, ep, frame)
+        obj = load_obj(path)
+        self.mesh_topology = obj
 
         # geometry
         path = "{}/{}/{}.bin".format(self.meshpath, ep, frame)
@@ -169,7 +159,7 @@ class MFINDDataset(BaseDataset):
         # view direction
         transf = np.genfromtxt(
             "{}/{}/{}_transform.txt".format(self.meshpath, ep, frame)
-        )onda install -c conda-forge imgaug
+        )
         R_f = transf[:3, :3]
         t_f = transf[:3, 3]
         campos = np.dot(R_f.T, self.campos[cam] - t_f).astype(np.float32)
@@ -184,10 +174,11 @@ class MFINDDataset(BaseDataset):
 
         M = intrin @ np.hstack((camrot, camt[None].T))
 
+
         return {
             # "cam_idx": cam,
-            "frame": frame,
-            "exp": ep,
+            # "frame": frame,
+            # "exp": ep,
             "cam": cam_id,
             "M": M.astype(np.float32),
             "uvs": self.mesh_topology["uvs"],
@@ -197,7 +188,7 @@ class MFINDDataset(BaseDataset):
             "mask": mask,
             "tex": tex,
             "view": view,
-            "transf": transf.astype(np.float32),
+            # "transf": transf.astype(np.float32),
             "aligned_verts": verts.reshape((-1, 3)).astype(np.float32),
-            "photo": photo,
+            "photo": photo
         }

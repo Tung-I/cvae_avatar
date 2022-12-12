@@ -27,7 +27,7 @@ class BaseLogger:
         self._add_scalars(epoch, train_log, valid_log)
         self._add_images(epoch, train_output, valid_output)
     
-     def close(self):
+    def close(self):
         self.writer.close()
 
     def _add_scalars(
@@ -72,11 +72,16 @@ class DAVAELogger(BaseLogger):
         valid_gt_screen = make_grid(valid_output['gt_screen'], nrow=1, normalize=True, scale_each=True, pad_value=1)
         valid_pred_screen = make_grid(valid_output['pred_screen'], nrow=1, normalize=True, scale_each=True, pad_value=1)
 
-        train_grid = torch.cat((train_gt_tex, train_pred_tex, train_gt_screen, train_pred_screen), dim=-1)
-        valid_grid = torch.cat((valid_gt_tex, valid_pred_tex, valid_gt_screen, valid_pred_screen), dim=-1)
+        train_grid_tex = torch.cat((train_gt_tex, train_pred_tex), dim=-1)
+        valid_grid_tex = torch.cat((valid_gt_tex, valid_pred_tex), dim=-1)
+        train_grid_screen = torch.cat((train_gt_screen, train_pred_screen), dim=-1)
+        valid_grid_screen = torch.cat((valid_gt_screen, valid_pred_screen), dim=-1)
 
-        self.writer.add_image('train', train_grid, epoch)
-        self.writer.add_image('valid', valid_grid, epoch)
+        self.writer.add_image('train_tex', train_grid_tex, epoch)
+        self.writer.add_image('valid_tex', valid_grid_tex, epoch)
+        self.writer.add_image('train_screen', train_grid_screen, epoch)
+        self.writer.add_image('valid_screen', valid_grid_screen, epoch)
+
 
 
 class ImageLogger(BaseLogger):

@@ -1,1 +1,1 @@
-from vanilla_dataloader import VanillaDataLoader
+from .vanilla_dataloader import VanillaDataLoader

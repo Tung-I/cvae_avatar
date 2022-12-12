@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
+from typing import Callable, Sequence, Union, List
 
 from runner.trainer import BaseTrainer
 from runner.utils import Renderer
@@ -37,7 +38,7 @@ class DAVAETrainer(BaseTrainer):
         self.lambda_tex = lambda_tex
         self.lambda_screen = lambda_screen
         self.lambda_kl = lambda_kl 
-        self.optimizer_cc = optim.Adam(self.net.module.get_cc_params(), 3e-4, (0.9, 0.999))
+        self.optimizer_cc = optim.Adam(self.net.get_cc_params(), 3e-4, (0.9, 0.999))
     
 
     def train(self):
@@ -107,14 +108,17 @@ class DAVAETrainer(BaseTrainer):
             batch = self._allocate_data(batch)
             batch_size, channel, height, width = batch["avg_tex"].shape
             gt_tex = batch["tex"]
-            vertmean = dataset.vertmean.to(self.device)
-            vertstd = dataset.vertstd.to(self.device)
-            texmean = dataset.texmean.to(self.device)
-            texstd = dataset.texstd.to(self.device)
-            loss_weight_mask = dataset.loss_weight_mask.to(self.device)
+            vertmean = torch.tensor(dataset.vertmean, dtype=torch.float32).view((1, -1, 3))
+            vertmean = vertmean.to(self.device)
+            vertstd = dataset.vertstd
+            texmean = torch.tensor(dataset.texmean).permute((2, 0, 1))[None, ...]
+            texmean = texmean.to(self.device)
+            texstd = dataset.texstd
+            loss_weight_mask = torch.tensor(dataset.loss_weight_mask).permute(2, 0, 1).unsqueeze(0).float()
+            loss_weight_mask = loss_weight_mask.to(self.device)
 
             if mode == 'training':
-                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cams"])
+                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cam"])
                 # compute loss
                 vert_loss = self.mse(pred_verts, batch["aligned_verts"])
                 pred_verts = pred_verts * vertstd + vertmean
@@ -134,10 +138,10 @@ class DAVAETrainer(BaseTrainer):
                     / (texstd**2)
                 )
                 total_loss = (
-                    args.lambda_verts * vert_loss +
-                    args.lambda_tex * tex_loss +
-                    args.lambda_screen * screen_loss +
-                    args.lambda_kl * kl
+                    self.lambda_verts * vert_loss +
+                    self.lambda_tex * tex_loss +
+                    self.lambda_screen * screen_loss +
+                    self.lambda_kl * kl
                 )
                 # loss backward
                 self.optimizer.zero_grad()
@@ -148,7 +152,7 @@ class DAVAETrainer(BaseTrainer):
                 self.optimizer_cc.step()
             else:
                 with torch.no_grad():
-                    pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cams"])
+                    pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cam"])
                     # compute loss
                     vert_loss = self.mse(pred_verts, batch["aligned_verts"])
                     pred_verts = pred_verts * vertstd + vertmean
@@ -168,30 +172,42 @@ class DAVAETrainer(BaseTrainer):
                         / (texstd**2)
                     )
                     total_loss = (
-                        args.lambda_verts * vert_loss +
-                        args.lambda_tex * tex_loss +
-                        args.lambda_screen * screen_loss +
-                        args.lambda_kl * kl
+                        self.lambda_verts * vert_loss +
+                        self.lambda_tex * tex_loss +
+                        self.lambda_screen * screen_loss +
+                        self.lambda_kl * kl
                     )
 
             self._update_log(log, batch_size, total_loss, [vert_loss, tex_loss, screen_loss, kl])
             count += batch_size
             trange.set_postfix(**dict((key, f'{value / count: .3f}') for key, value in log.items()))
-            # for logger
-            gt_tex *= 255
-            pred_tex = torch.clamp(pred_tex*255, 0, 255)
-            gt_screen = batch["photo"] * 255
-            pred_screen = torch.clamp(pred_screen*255, 0, 255)
+        
 
         for key in log:
             log[key] /= count
 
+        # for logger
+        gt_tex *= 255
+        # gt_tex *= batch["mask"]
+        pred_tex = torch.clamp(pred_tex*255, 0, 255)
+        # pred_tex *= batch["mask"]
+
+        gt_screen = batch["photo"] * 255
+        pred_screen = torch.clamp(pred_screen*255, 0, 255)
+
+        
         output = {
-            "gt_tex": gt_tex,
+            "gt_tex": gt_tex, 
             "pred_tex": pred_tex,
-            "gt_screen": gt_screen,
-            "pred_screen": pred_screen
+            "gt_screen": gt_screen.permute(0, 3, 1, 2),
+            "pred_screen": pred_screen.permute(0, 3, 1, 2)
         }
+
+        # print(gt_tex.size())
+        # print(pred_tex.size())
+        # print(gt_screen.size())
+        # print(pred_screen.size())
+        # raise Exception(' ')
 
         
 
@@ -212,7 +228,7 @@ class DAVAETrainer(BaseTrainer):
         self,
         log: dict,
         batch_size: int,
-        loss: torch.Tensor,
+        total_loss: torch.Tensor,
         losses: Sequence[torch.Tensor],
     ):
         log['Loss'] += total_loss.item() * batch_size
@@ -226,7 +242,7 @@ class DAVAETrainer(BaseTrainer):
         batch: dict
     ):
         for key in batch:
-            batch[key] = batch[key].to(self.device)
+            batch[key] = batch[key].cuda()
         return batch
 
 

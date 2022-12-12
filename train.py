@@ -43,8 +43,7 @@ def main(args):
     config.dataset.kwargs.update(base_dir=base_dir, type='valid')
     valid_dataset = _get_instance(data.dataset, config.dataset)
 
-    print(len(train_dataset.cameras))
-    raise Exception(' ')
+    n_cameras = len(train_dataset.cameras)
 
     # dataloaders
     logging.info('Create the training and validation dataloaders.')
@@ -56,6 +55,7 @@ def main(args):
 
     # model
     logging.info('Create the network architecture.')
+    config.net.kwargs.update(n_cams=n_cameras)
     net = _get_instance(model.net, config.net)
     logging.info('Create the optimizer.')
     optimizer = _get_instance(torch.optim, config.optimizer, net.get_model_params())

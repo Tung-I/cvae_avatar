@@ -1,18 +1,18 @@
 main:
     random_seed: 0
-    saved_dir: '/home/tungi/cvae_avatar/saved/tmp'
+    saved_dir: './saved/tmp'
 
 dataset:
     name: 'MFINDDataset'
     kwargs:
-        base_dir: '/home/tungi/datasets/mf_individuals/'
-        size: 1024
+        base_dir: '/datasets/mf_individuals'
+        tex_size: 1024
         debug: true
             
 dataloader:
     name: 'VanillaDataLoader'
     kwargs:
-        train_batch_size: 2
+        train_batch_size: 4
         valid_batch_size: 1
         shuffle: true
         num_workers: 8
@@ -22,14 +22,13 @@ net:
     kwargs:
         tex_size: 1024
         mesh_inp_size: 21918
-        nlatent: 256
+        n_latent: 256
         res: true
-        n_cams: 38
         
 optimizer:
     name: 'Adam'
     kwargs:
-        lr: 3e-4
+        lr: 0.0003
         weight_decay: 0
         amsgrad: false
 
@@ -60,6 +59,6 @@ trainer:
         lambda_verts: 1.0
         lambda_tex: 1.0
         lambda_screen: 1.0
-        lambda_kl: 1e-2 
+        lambda_kl: 0.01 
         device: 'cuda:0'
         num_epochs: 48
