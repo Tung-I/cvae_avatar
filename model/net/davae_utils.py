@@ -6,14 +6,57 @@ import torch.nn.functional as F
 
 
 
-class LinearWN(nn.Linear):
-    def __init__(self, in_features, out_features, bias=True):
-        super(LinearWN, self).__init__(in_features, out_features, bias)
-        self.g = nn.Parameter(torch.ones(out_features))
+class TextureDecoder(nn.Module):
+    def __init__(self, tex_size, z_dim, res=False, non=False, bilinear=False):
+        super(TextureDecoder, self).__init__()
+        base = 2 if tex_size == 512 else 4
+        self.z_dim = z_dim
 
-    def forward(self, input):
-        wnorm = torch.sqrt(torch.sum(self.weight**2))
-        return F.linear(input, self.weight * self.g[:, None] / wnorm, self.bias)
+        self.upsample = nn.Sequential(
+            ConvUpsample(
+                z_dim, z_dim, 64, base, res=res, use_bilinear=bilinear, non=non
+            ),
+            ConvUpsample(
+                64, 64, 32, base * (2**2), res=res, use_bilinear=bilinear, non=non
+            ),
+            ConvUpsample(
+                32, 32, 16, base * (2**4), res=res, use_bilinear=bilinear, non=non
+            ),
+            ConvUpsample(
+                16,
+                16,
+                3,
+                base * (2**6),
+                no_activ=True,
+                res=res,
+                use_bilinear=bilinear,
+                non=non,
+            ),
+        )
+
+    def forward(self, x):
+        b, n = x.shape
+        h = int(np.sqrt(n / self.z_dim))
+        x = x.view((-1, self.z_dim, h, h))
+        out = self.upsample(x)
+        return out
+
+
+class TextureEncoder(nn.Module):
+    def __init__(self, res=False):
+        super(TextureEncoder, self).__init__()
+        self.downsample = nn.Sequential(
+            ConvDownsample(3, 16, 16, res=res),
+            ConvDownsample(16, 32, 32, res=res),
+            ConvDownsample(32, 64, 64, res=res),
+            ConvDownsample(64, 128, 128, res=res),
+        )
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        feat = self.downsample(x)
+        out = feat.view((b, -1))
+        return out
 
 
 class MLP(nn.Module):
@@ -90,62 +133,6 @@ class ConvUpsample(nn.Module):
         return h
 
 
-class TextureDecoder(nn.Module):
-    def __init__(self, tex_size, z_dim, res=False, non=False, bilinear=False):
-        super(TextureDecoder, self).__init__()
-        base = 2 if tex_size == 512 else 4
-        self.z_dim = z_dim
-
-        self.upsample = nn.Sequential(
-            ConvUpsample(
-                z_dim, z_dim, 64, base, res=res, use_bilinear=bilinear, non=non
-            ),
-            ConvUpsample(
-                64, 64, 32, base * (2**2), res=res, use_bilinear=bilinear, non=non
-            ),
-            ConvUpsample(
-                32, 32, 16, base * (2**4), res=res, use_bilinear=bilinear, non=non
-            ),
-            ConvUpsample(
-                16,
-                16,
-                3,
-                base * (2**6),
-                no_activ=True,
-                res=res,
-                use_bilinear=bilinear,
-                non=non,
-            ),
-        )
-
-    def forward(self, x):
-        b, n = x.shape
-        h = int(np.sqrt(n / self.z_dim))
-        x = x.view((-1, self.z_dim, h, h))
-        out = self.upsample(x)
-
-        return out
-
-
-
-
-class TextureEncoder(nn.Module):
-    def __init__(self, res=False):
-        super(TextureEncoder, self).__init__()
-        self.downsample = nn.Sequential(
-            ConvDownsample(3, 16, 16, res=res),
-            ConvDownsample(16, 32, 32, res=res),
-            ConvDownsample(32, 64, 64, res=res),
-            ConvDownsample(64, 128, 128, res=res),
-        )
-
-    def forward(self, x):
-        b, c, h, w = x.shape
-        feat = self.downsample(x)
-        out = feat.view((b, -1))
-        return out
-
-
 class DeconvTexelBias(nn.Module):
     def __init__(
         self,
@@ -180,6 +167,79 @@ class DeconvTexelBias(nn.Module):
             x = F.interpolate(x, scale_factor=2)
         out = self.deconv(x) + self.bias
         return out
+
+
+class ColorCorrection(nn.Module):
+    def __init__(self, n_cameras, nc=3):
+        super(ColorCorrection, self).__init__()
+        # anchors the 0th camera
+        self.weight_anchor = nn.Parameter(torch.ones(1, nc, 1, 1), requires_grad=False)
+        self.bias_anchor = nn.Parameter(torch.zeros(1, 3, 1, 1), requires_grad=False)
+        self.weight = nn.Parameter(torch.ones(n_cameras - 1, 3, 1, 1))
+        self.bias = nn.Parameter(torch.zeros(n_cameras - 1, 3, 1, 1))
+
+    def forward(self, texture, cam):
+        weights = torch.cat([self.weight_anchor, self.weight], dim=0)
+        biases = torch.cat([self.bias_anchor, self.bias], dim=0)
+        w = weights[cam]
+        b = biases[cam]
+        output = texture * w + b
+        return output
+
+
+def glorot(m, alpha):
+    gain = math.sqrt(2.0 / (1.0 + alpha**2))
+
+    if isinstance(m, nn.Conv2d):
+        ksize = m.kernel_size[0] * m.kernel_size[1]
+        n1 = m.in_channels
+        n2 = m.out_channels
+
+        std = gain * math.sqrt(2.0 / ((n1 + n2) * ksize))
+    elif isinstance(m, nn.ConvTranspose2d):
+        ksize = m.kernel_size[0] * m.kernel_size[1] // 4
+        n1 = m.in_channels
+        n2 = m.out_channels
+
+        std = gain * math.sqrt(2.0 / ((n1 + n2) * ksize))
+    elif isinstance(m, nn.Linear):
+        n1 = m.in_features
+        n2 = m.out_features
+
+        std = gain * math.sqrt(2.0 / (n1 + n2))
+    else:
+        return
+
+    # m.weight.data.normal_(0, std)
+    m.weight.data.uniform_(-std * math.sqrt(3.0), std * math.sqrt(3.0))
+    m.bias.data.zero_()
+
+    if isinstance(m, nn.ConvTranspose2d):
+        # hardcoded for stride=2 for now
+        m.weight.data[:, :, 0::2, 1::2] = m.weight.data[:, :, 0::2, 0::2]
+        m.weight.data[:, :, 1::2, 0::2] = m.weight.data[:, :, 0::2, 0::2]
+        m.weight.data[:, :, 1::2, 1::2] = m.weight.data[:, :, 0::2, 0::2]
+
+    # if isinstance(m, Conv2dWNUB) or isinstance(m, ConvTranspose2dWNUB) or isinstance(m, LinearWN):
+    if (
+        isinstance(m, Conv2dWNUB)
+        or isinstance(m, Conv2dWN)
+        or isinstance(m, ConvTranspose2dWN)
+        or isinstance(m, ConvTranspose2dWNUB)
+        or isinstance(m, LinearWN)
+    ):
+        norm = np.sqrt(torch.sum(m.weight.data[:] ** 2))
+        m.g.data[:] = norm
+
+
+class LinearWN(nn.Linear):
+    def __init__(self, in_features, out_features, bias=True):
+        super(LinearWN, self).__init__(in_features, out_features, bias)
+        self.g = nn.Parameter(torch.ones(out_features))
+
+    def forward(self, input):
+        wnorm = torch.sqrt(torch.sum(self.weight**2))
+        return F.linear(input, self.weight * self.g[:, None] / wnorm, self.bias)
 
 
 class Conv2dWNUB(nn.Conv2d):
@@ -340,48 +400,3 @@ class ConvTranspose2dWN(nn.ConvTranspose2d):
             dilation=self.dilation,
             groups=self.groups,
         )
-
-
-def glorot(m, alpha):
-    gain = math.sqrt(2.0 / (1.0 + alpha**2))
-
-    if isinstance(m, nn.Conv2d):
-        ksize = m.kernel_size[0] * m.kernel_size[1]
-        n1 = m.in_channels
-        n2 = m.out_channels
-
-        std = gain * math.sqrt(2.0 / ((n1 + n2) * ksize))
-    elif isinstance(m, nn.ConvTranspose2d):
-        ksize = m.kernel_size[0] * m.kernel_size[1] // 4
-        n1 = m.in_channels
-        n2 = m.out_channels
-
-        std = gain * math.sqrt(2.0 / ((n1 + n2) * ksize))
-    elif isinstance(m, nn.Linear):
-        n1 = m.in_features
-        n2 = m.out_features
-
-        std = gain * math.sqrt(2.0 / (n1 + n2))
-    else:
-        return
-
-    # m.weight.data.normal_(0, std)
-    m.weight.data.uniform_(-std * math.sqrt(3.0), std * math.sqrt(3.0))
-    m.bias.data.zero_()
-
-    if isinstance(m, nn.ConvTranspose2d):
-        # hardcoded for stride=2 for now
-        m.weight.data[:, :, 0::2, 1::2] = m.weight.data[:, :, 0::2, 0::2]
-        m.weight.data[:, :, 1::2, 0::2] = m.weight.data[:, :, 0::2, 0::2]
-        m.weight.data[:, :, 1::2, 1::2] = m.weight.data[:, :, 0::2, 0::2]
-
-    # if isinstance(m, Conv2dWNUB) or isinstance(m, ConvTranspose2dWNUB) or isinstance(m, LinearWN):
-    if (
-        isinstance(m, Conv2dWNUB)
-        or isinstance(m, Conv2dWN)
-        or isinstance(m, ConvTranspose2dWN)
-        or isinstance(m, ConvTranspose2dWNUB)
-        or isinstance(m, LinearWN)
-    ):
-        norm = np.sqrt(torch.sum(m.weight.data[:] ** 2))
-        m.g.data[:] = norm

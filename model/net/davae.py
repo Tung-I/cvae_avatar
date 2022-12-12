@@ -8,6 +8,68 @@ from model.net.base_net import BaseNet
 from model.net.davae_utils import *
 
 
+class DeepAppearanceVAE(nn.Module):
+    def __init__(
+        self,
+        tex_size=1024,
+        mesh_inp_size=21918,
+        mode="vae",
+        n_latent=128,
+        n_cams=38,
+        res=False,
+        non=False,
+        bilinear=False,
+    ):
+        super(DeepAppearanceVAE, self).__init__()
+        z_dim = n_latent if mode == "vae" else n_latent * 2
+        self.mode = mode
+        self.enc = DeepApperanceEncoder(
+            tex_size, mesh_inp_size, n_latent=z_dim, res=res
+        )
+        self.dec = DeepAppearanceDecoder(
+            tex_size, mesh_inp_size, z_dim=z_dim, res=res, non=non, bilinear=bilinear
+        )
+        self.cc = ColorCorrection(n_cams)
+
+    def forward(self, avgtex, mesh, view, cams=None):
+        b, n, _ = mesh.shape
+        mesh = mesh.view((b, -1))
+        mean, logstd = self.enc(avgtex, mesh)
+        mean = mean * 0.1
+        logstd = logstd * 0.01
+        if self.mode == "vae":
+            kl = 0.5 * torch.mean(torch.exp(2 * logstd) + mean**2 - 1.0 - 2 * logstd)
+            std = torch.exp(logstd)
+            eps = torch.randn_like(mean)
+            z = mean + std * eps
+        else:
+            z = torch.cat((mean, logstd), -1)
+            kl = torch.tensor(0).to(z.device)
+
+        pred_tex, pred_mesh = self.dec(z, view)
+        pred_mesh = pred_mesh.view((b, n, 3))
+        if cams is not None:
+            pred_tex = self.cc(pred_tex, cams)
+        return pred_tex, pred_mesh, kl
+
+    def get_mesh_branch_params(self):
+        p = self.enc.get_mesh_branch_params() + self.dec.get_mesh_branch_params()
+        return p
+
+    def get_tex_branch_params(self):
+        p = self.enc.get_tex_branch_params() + self.dec.get_tex_branch_params()
+        return p
+
+    def get_model_params(self):
+        params = []
+        params += list(self.enc.parameters())
+        params += list(self.dec.parameters())
+        return params
+
+    def get_cc_params(self):
+        return self.cc.parameters()
+
+
 class DeepAppearanceDecoder(nn.Module):
     def __init__(
         self, tex_size, mesh_size, z_dim=128, res=False, non=False, bilinear=False
@@ -17,12 +79,10 @@ class DeepAppearanceDecoder(nn.Module):
         self.texture_decoder = TextureDecoder(
             tex_size, z_dim, res=res, non=non, bilinear=bilinear
         )
-        # self.view_fc = LinearWN(3, 8)
-        self.view_fc = LinearWN(9, 16)
+        self.view_fc = LinearWN(3, 8)
         self.z_fc = LinearWN(z_dim, 256)
         self.mesh_fc = LinearWN(256, mesh_size)
-        # self.texture_fc = LinearWN(256 + 8, nhidden)
-        self.texture_fc = LinearWN(256 + 16, nhidden)
+        self.texture_fc = LinearWN(256 + 8, nhidden)
         self.relu = nn.LeakyReLU(0.2, inplace=True)
 
         self.apply(lambda x: glorot(x, 0.2))
@@ -81,65 +141,3 @@ class DeepApperanceEncoder(nn.Module):
         p += list(self.fc.parameters())
         return p
 
-
-class DeepAppearanceVAE(BaseNet):
-    def __init__(
-        self,
-        tex_size,
-        mesh_inp_size=21918,
-        mode="vae",
-        n_latent=128,
-        # n_cams=38,
-        res=False,
-        non=False,
-        bilinear=False,
-    ):
-        super(DeepAppearanceVAE, self).__init__()
-        z_dim = n_latent if mode == "vae" else n_latent * 2
-        self.mode = mode
-        self.enc = DeepApperanceEncoder(
-            tex_size, mesh_inp_size, n_latent=z_dim, res=res
-        )
-        self.dec = DeepAppearanceDecoder(
-            tex_size, mesh_inp_size, z_dim=z_dim, res=res, non=non, bilinear=bilinear
-        )
-        # self.cc = ColorCorrection(n_cams)
-
-    def forward(self, avgtex, mesh, view, cams=None):
-        b, n, _ = mesh.shape
-        mesh = mesh.view((b, -1))
-        mean, logstd = self.enc(avgtex, mesh)
-        mean = mean * 0.1
-        logstd = logstd * 0.01
-        if self.mode == "vae":
-            kl = 0.5 * torch.mean(torch.exp(2 * logstd) + mean**2 - 1.0 - 2 * logstd)
-            std = torch.exp(logstd)
-            eps = torch.randn_like(mean)
-            z = mean + std * eps
-        else:
-            z = torch.cat((mean, logstd), -1)
-            kl = torch.tensor(0).to(z.device)
-
-        pred_tex, pred_mesh = self.dec(z, view)
-        pred_mesh = pred_mesh.view((b, n, 3))
-        # if cams is not None:
-        #     pred_tex = self.cc(pred_tex, cams)
-        return pred_tex, pred_mesh, kl
-
-
-    def get_mesh_branch_params(self):
-        p = self.enc.get_mesh_branch_params() + self.dec.get_mesh_branch_params()
-        return p
-
-    def get_tex_branch_params(self):
-        p = self.enc.get_tex_branch_params() + self.dec.get_tex_branch_params()
-        return p
-
-    def get_model_params(self):
-        params = []
-        params += list(self.enc.parameters())
-        params += list(self.dec.parameters())
-        return params
-
-    # def get_cc_params(self):
-    #     return self.cc.parameters()

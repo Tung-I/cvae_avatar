@@ -12,7 +12,7 @@ dataset:
 dataloader:
     name: 'VanillaDataLoader'
     kwargs:
-        train_batch_size: 4
+        train_batch_size: 2
         valid_batch_size: 1
         shuffle: true
         num_workers: 8
@@ -21,8 +21,11 @@ net:
     name: 'DeepAppearanceVAE'
     kwargs:
         tex_size: 1024
+        mesh_inp_size: 21918
+        nlatent: 256
+        res: true
+        n_cams: 38
         
-
 optimizer:
     name: 'Adam'
     kwargs:
@@ -37,7 +40,7 @@ lr_scheduler:
         gamma: 0.95
 
 logger:
-    name: 'ImageLogger'
+    name: 'DAVAELogger'
     kwargs:
         dummy_input: [16, 1, 128, 128]
 
@@ -52,5 +55,11 @@ monitor:
 trainer:
     name: 'DAVAETrainer'
     kwargs:
+        tex_size: 1024
+        resolution: [2048, 1334]
+        lambda_verts: 1.0
+        lambda_tex: 1.0
+        lambda_screen: 1.0
+        lambda_kl: 1e-2 
         device: 'cuda:0'
         num_epochs: 48

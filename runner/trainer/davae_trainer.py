@@ -50,9 +50,9 @@ class DAVAETrainer(BaseTrainer):
 
             # Do training and validation.
             logging.info(f'Epoch {self.epoch}.')
-            train_log, train_batch, train_outputs = self._run_epoch('training')
+            train_log, train_output = self._run_epoch('training')
             logging.info(f'Train log: {train_log}.')
-            valid_log, valid_batch, valid_outputs = self._run_epoch('validation')
+            valid_log, valid_output = self._run_epoch('validation')
             logging.info(f'Valid log: {valid_log}.')
 
             # Adjust the learning rate.
@@ -64,8 +64,7 @@ class DAVAETrainer(BaseTrainer):
                 self.lr_scheduler.step()
 
             # Record the log information and visualization.
-            self.logger.write(self.epoch, train_log, train_batch, train_outputs,
-                              valid_log, valid_batch, valid_outputs)
+            self.logger.write(self.epoch, train_log, train_output, valid_log, valid_output)
 
             # Save the regular checkpoint.
             saved_path = self.monitor.is_saved(self.epoch)
@@ -107,6 +106,7 @@ class DAVAETrainer(BaseTrainer):
         for batch in trange:
             batch = self._allocate_data(batch)
             batch_size, channel, height, width = batch["avg_tex"].shape
+            gt_tex = batch["tex"]
             vertmean = dataset.vertmean.to(self.device)
             vertstd = dataset.vertstd.to(self.device)
             texmean = dataset.texmean.to(self.device)
@@ -114,7 +114,7 @@ class DAVAETrainer(BaseTrainer):
             loss_weight_mask = dataset.loss_weight_mask.to(self.device)
 
             if mode == 'training':
-                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["verts"], batch["view"], cams=batch["cams"])
+                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cams"])
                 # compute loss
                 vert_loss = self.mse(pred_verts, batch["aligned_verts"])
                 pred_verts = pred_verts * vertstd + vertmean
@@ -148,7 +148,7 @@ class DAVAETrainer(BaseTrainer):
                 self.optimizer_cc.step()
             else:
                 with torch.no_grad():
-                    pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["verts"], batch["view"], cams=batch["cams"])
+                    pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cams"])
                     # compute loss
                     vert_loss = self.mse(pred_verts, batch["aligned_verts"])
                     pred_verts = pred_verts * vertstd + vertmean
@@ -177,11 +177,25 @@ class DAVAETrainer(BaseTrainer):
             self._update_log(log, batch_size, total_loss, [vert_loss, tex_loss, screen_loss, kl])
             count += batch_size
             trange.set_postfix(**dict((key, f'{value / count: .3f}') for key, value in log.items()))
+            # for logger
+            gt_tex *= 255
+            pred_tex = torch.clamp(pred_tex*255, 0, 255)
+            gt_screen = batch["photo"] * 255
+            pred_screen = torch.clamp(pred_screen*255, 0, 255)
 
         for key in log:
             log[key] /= count
 
-        return log, {'image': frontview, 'label': targetview}, pred_tex
+        output = {
+            "gt_tex": gt_tex,
+            "pred_tex": pred_tex,
+            "gt_screen": gt_screen,
+            "pred_screen": pred_screen
+        }
+
+        
+
+        return log, output
 
     
 

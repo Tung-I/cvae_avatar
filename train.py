@@ -24,8 +24,6 @@ def main(args):
     with open(saved_dir / 'config.yaml', 'w+') as f:
         yaml.dump(config.to_dict(), f, default_flow_style=False)
 
-
-
     # Make experiment results deterministic.
     random.seed(config.main.random_seed)
     torch.manual_seed(random.getstate()[1][1])
@@ -37,66 +35,49 @@ def main(args):
         raise RuntimeError("cuda unavailable.")
     device = torch.device(config.trainer.kwargs.device)
 
+    # datasets
     logging.info('Create the training and validation datasets.')
     base_dir = Path(config.dataset.kwargs.base_dir)
-    config.dataset.kwargs.update(base_dir=base_dir, type='train', device=device)
+    config.dataset.kwargs.update(base_dir=base_dir, type='train')
     train_dataset = _get_instance(data.dataset, config.dataset)
-    config.dataset.kwargs.update(base_dir=base_dir, type='valid', device=device)
+    config.dataset.kwargs.update(base_dir=base_dir, type='valid')
     valid_dataset = _get_instance(data.dataset, config.dataset)
 
+    print(len(train_dataset.cameras))
+    raise Exception(' ')
+
+    # dataloaders
     logging.info('Create the training and validation dataloaders.')
-    # cls = getattr(src.data.datasets, config.dataset.name)
     train_batch_size, valid_batch_size = config.dataloader.kwargs.pop('train_batch_size'), config.dataloader.kwargs.pop('valid_batch_size')
     config.dataloader.kwargs.update(collate_fn=None, batch_size=train_batch_size)
-    train_dataloader = _get_instance(dataloader, config.dataloader, train_dataset)
+    train_dataloader = _get_instance(data.dataloader, config.dataloader, train_dataset)
     config.dataloader.kwargs.update(batch_size=valid_batch_size)
-    valid_dataloader = _get_instance(dataloader, config.dataloader, valid_dataset)
+    valid_dataloader = _get_instance(data.dataloader, config.dataloader, valid_dataset)
 
+    # model
     logging.info('Create the network architecture.')
     net = _get_instance(model.net, config.net)
-
-    # logging.info('Create the loss functions and the corresponding weights.')
-    # loss_fns, loss_weights = [], []
-    # defaulted_loss_fns = [loss_fn for loss_fn in dir(torch.nn) if 'Loss' in loss_fn]
-    # for config_loss in config.losses:
-    #     if config_loss.name in defaulted_loss_fns:
-    #         loss_fn = _get_instance(torch.nn, config_loss)
-    #     else:
-    #         loss_fn = _get_instance(model.losses, config_loss)
-    #     loss_fns.append(loss_fn)
-    #     loss_weights.append(config_loss.weight)
-
-    # logging.info('Create the metric functions.')
-    # metric_fns = []
-    # for config_metric in config.metrics:
-    #     if config_metric.name in defaulted_loss_fns:
-    #         metric_fn = _get_instance(torch.nn, config_metric)
-    #     else:
-    #         metric_fn = _get_instance(model.metrics, config_metric)
-    #     metric_fns.append(metric_fn)
-
     logging.info('Create the optimizer.')
-    optimizer = _get_instance(torch.optim, config.optimizer, net.parameters())
-
+    optimizer = _get_instance(torch.optim, config.optimizer, net.get_model_params())
     logging.info('Create the learning rate scheduler.')
     lr_scheduler = _get_instance(torch.optim.lr_scheduler, config.lr_scheduler, optimizer) if config.get('lr_scheduler') else None
 
+    # logger & monitor
     logging.info('Create the logger.')
     config.logger.kwargs.update(log_dir=saved_dir / 'log', dummy_input=torch.randn(tuple(config.logger.kwargs.dummy_input)))
     logger = _get_instance(callback.loggers, config.logger)
-
     logging.info('Create the monitor.')
     config.monitor.kwargs.update(checkpoints_dir=saved_dir / 'checkpoints')
     monitor = _get_instance(callback.monitor, config.monitor)
 
+    # trainer
     logging.info('Create the trainer.')
     kwargs = {'device': device,
                 'train_dataloader': train_dataloader,
                 'valid_dataloader': valid_dataloader,
+                'train_dataset': train_dataset,
+                'valid_dataset': valid_dataset,
                 'net': net,
-                'loss_fns': loss_fns,
-                'loss_weights': loss_weights,
-                'metric_fns': metric_fns,
                 'optimizer': optimizer,
                 'lr_scheduler': lr_scheduler,
                 'logger': logger,
@@ -104,6 +85,7 @@ def main(args):
     config.trainer.kwargs.update(kwargs)
     trainer = _get_instance(runner.trainer, config.trainer)
 
+    # training
     loaded_path = config.main.get('loaded_path')
     if loaded_path:
         logging.info(f'Load the previous checkpoint from "{loaded_path}".')
