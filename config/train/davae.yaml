@@ -1,0 +1,70 @@
+main:
+    random_seed: 0
+    saved_dir: '/home/tungi/conferencing/saved/train'
+
+dataset:
+    name: 'DAVAEDataset'
+    kwargs:
+        base_dir: '/home/tungi/datasets/MF_subset'
+        resolution: 512
+        view_range: 15
+        view_dist: 280
+        degree_per_view: 2
+        debug: true
+            
+dataloader:
+    name: 'ImageLoader'
+    kwargs:
+        train_batch_size: 4
+        valid_batch_size: 1
+        shuffle: true
+        num_workers: 0
+
+net:
+    name: 'DeepAppearanceVAE'
+    kwargs:
+        tex_size: 512
+        
+losses:
+    - name: 'MeshLoss'
+      weight: 1.0
+    - name: 'ScreenLoss'
+      weight: 1.0
+    - name: 'KLLoss'
+      weight: 1e-2
+
+metrics:
+    - name: 'PSNR'
+    - name: 'SSIM'
+
+optimizer:
+    name: 'Adam'
+    kwargs:
+        lr: 3e-4
+        weight_decay: 0
+        amsgrad: false
+
+lr_scheduler:
+    name: StepLR
+    kwargs:
+        step_size: 1
+        gamma: 0.95
+
+logger:
+    name: 'ImageLogger'
+    kwargs:
+        dummy_input: [16, 1, 128, 128]
+
+monitor:
+    name: 'Monitor'
+    kwargs:
+        mode: 'min'
+        target: 'Loss'
+        saved_freq: 10
+        early_stop: 0
+
+trainer:
+    name: 'DAVAETrainer'
+    kwargs:
+        device: 'cuda:0'
+        num_epochs: 64
