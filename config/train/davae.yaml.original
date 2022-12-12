@@ -3,18 +3,22 @@ main:
     saved_dir: '/home/tungi/conferencing/saved/train'
 
 dataset:
-    name: 'DAVAE2Dataset'
+    name: 'DAVAEDataset'
     kwargs:
-        base_dir: '/home/tungi/datasets/MF_davae'
-        debug: false
+        base_dir: '/home/tungi/datasets/MF_subset'
+        resolution: 512
+        view_range: 15
+        view_dist: 280
+        degree_per_view: 2
+        debug: true
             
 dataloader:
     name: 'ImageLoader'
     kwargs:
-        train_batch_size: 16
-        valid_batch_size: 4
+        train_batch_size: 4
+        valid_batch_size: 1
         shuffle: true
-        num_workers: 8
+        num_workers: 0
 
 net:
     name: 'DeepAppearanceVAE'

@@ -9,20 +9,29 @@ import json
 import random
 import sys
 
+from base_dataset import BaseDataset
 from utils import *
 
 
-class MFINDDataset(torch.utils.data.Dataset):
+individual = 'm--20181017--0000--002914589--GHS'
+# cam_valid = ['400013', '400042', '400060']
+
+
+class MFINDDataset(BaseDataset):
     def __init__(
         self,
-        base_dir='/home/tungi/datasets/mf_individuals/m--20181017--0000--002914589--GHS',
-        size=1024
+        tex_size=1024,
+        **kwargs
     ):
-        self.uvpath = "{}/unwrapped_uv_1024".format(base_dir)
-        self.meshpath = "{}/tracked_mesh".format(base_dir)
-        self.photopath = "{}/images".format(base_dir)
-        self.size = size
-        self.krt_path = "{}/KRT".format(base_dir)
+        super().__init__(**kwargs)
+        self.base_dir = '{}/{}'.format(str(self.base_dir), individual)
+        self.tex_size = tex_size
+
+        self.maskpath = "./loss_weight_mask.png"
+        self.uvpath = "{}/unwrapped_uv_1024".format(self.base_dir)
+        self.meshpath = "{}/tracked_mesh".format(self.base_dir)
+        self.photopath = "{}/images".format(self.base_dir)
+        self.krt_path = "{}/KRT".format(self.base_dir)
         self.camera_ids = {}
         self.expressions = [str(x.parts[-1]) for x in Path(self.meshpath).iterdir() if x.is_dir()]
         self.expressions.sort()
@@ -56,6 +65,18 @@ class MFINDDataset(torch.utils.data.Dataset):
                     if os.path.isfile(path) is True:
                         self.framelist.append((ep, cam, n))
 
+                # for i, cam in enumerate(self.cameras):
+                #     path = "{}/{}/{}/{}.png".format(self.uvpath, ep, cam, n)
+                #     if os.path.isfile(path) is True:
+                #         if self.type == 'train' and cam not in cam_valid:
+                #             self.framelist.append((ep, cam, n))
+                #         elif self.type =='valid' and cam in cam_valid:
+                #             self.framelist.append((ep, cam, n))
+                #         else:
+                #             continue
+                
+
+
         # compute view directions of each camera
         campos = {}
         for cam in self.cameras:
@@ -65,24 +86,43 @@ class MFINDDataset(torch.utils.data.Dataset):
 
         # load mean image and std
         texmean = np.asarray(
-            Image.open("{}/tex_mean.png".format(base_dir)), dtype=np.float32
+            Image.open("{}/tex_mean.png".format(self.base_dir)), dtype=np.float32
         )
         self.texmean = np.copy(np.flip(texmean, 0))
-        self.texstd = float(np.genfromtxt("{}/tex_var.txt".format(base_dir)) ** 0.5)
-        self.texmin = (
-            np.zeros_like(self.texmean, dtype=np.float32) - self.texmean
-        ) / self.texstd
-        self.texmax = (
-            np.ones_like(self.texmean, dtype=np.float32) * 255 - self.texmean
-        ) / self.texstd
+        self.texstd = float(np.genfromtxt("{}/tex_var.txt".format(self.base_dir)) ** 0.5)
+        # self.texmin = (
+        #     np.zeros_like(self.texmean, dtype=np.float32) - self.texmean
+        # ) / self.texstd
+        # self.texmax = (
+        #     np.ones_like(self.texmean, dtype=np.float32) * 255 - self.texmean
+        # ) / self.texstd
 
         self.vertmean = np.fromfile(
-            "{}/vert_mean.bin".format(base_dir), dtype=np.float32
+            "{}/vert_mean.bin".format(self.base_dir), dtype=np.float32
         )
-        self.vertstd = float(np.genfromtxt("{}/vert_var.txt".format(base_dir)) ** 0.5)
-        
+        self.vertstd = float(np.genfromtxt("{}/vert_var.txt".format(self.base_dir)) ** 0.5)
+
+        # weight mask
+        self.loss_weight_mask = cv2.flip(cv2.imread(self.maskpath), 0)
+
+        # resize and to_tensor
+        self.texmean = cv2.resize(self.texmean, (self.tex_size, self.tex_size))
+        self.texmean = torch.tensor(self.texmean).permute((2, 0, 1))[None, ...]
+        self.vertmean = torch.tensor(self.vertmean, dtype=torch.float32).view((1, -1, 3))
+        self.loss_weight_mask = self.loss_weight_mask / self.loss_weight_mask.max()
+        self.loss_weight_mask = torch.tensor(self.loss_weight_mask).permute(2, 0, 1).unsqueeze(0).float()
+            
+        # sampling for validation and debugging
+        if self.type=='valid':
+            random.seed(0)
+            self.framelist = random.sample(self.framelist, 400)
+        if self.debug:
+            self.framelist = random.sample(self.framelist, 40)
+
+
     def __len__(self):
         return len(self.framelist)
+
 
     def __getitem__(self, idx):
         ep, cam, frame = self.framelist[idx]
@@ -107,7 +147,7 @@ class MFINDDataset(torch.utils.data.Dataset):
         avgtex -= self.texmean
         avgtex /= self.texstd
         avgtex[mask] = 0.0
-        avgtex = cv2.resize(avgtex, (self.size, self.size)).transpose((2, 0, 1))
+        avgtex = cv2.resize(avgtex, (self.tex_size, self.tex_size)).transpose((2, 0, 1))
 
         # image
         path = "{}/{}/{}/{}.png".format(self.photopath, ep, cam, frame)
@@ -121,9 +161,9 @@ class MFINDDataset(torch.utils.data.Dataset):
         tex -= self.texmean
         tex /= self.texstd
         tex[mask] = 0.0
-        tex = cv2.resize(tex, (self.size, self.size)).transpose((2, 0, 1))
+        tex = cv2.resize(tex, (self.tex_size, self.tex_size)).transpose((2, 0, 1))
         mask = 1.0 - cv2.resize(
-            mask.astype(np.float32), (self.size, self.size)
+            mask.astype(np.float32), (self.tex_size, self.tex_size)
         ).transpose((2, 0, 1))
 
         # view direction
@@ -145,7 +185,7 @@ class MFINDDataset(torch.utils.data.Dataset):
         M = intrin @ np.hstack((camrot, camt[None].T))
 
         return {
-            "cam_idx": cam,
+            # "cam_idx": cam,
             "frame": frame,
             "exp": ep,
             "cam": cam_id,

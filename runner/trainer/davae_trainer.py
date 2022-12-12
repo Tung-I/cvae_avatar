@@ -1,18 +1,45 @@
-import torch
 import logging
-from tqdm import tqdm
 import random
 import copy
 import numpy as np
 import sys
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from tqdm import tqdm
 
 from runner.trainer import BaseTrainer
+from runner.utils import Renderer
 
 
 class DAVAETrainer(BaseTrainer):
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        tex_size,
+        resolution,
+        train_dataset, 
+        valid_dataset,
+        lambda_screen=1.0,
+        lambda_tex=1.0,
+        lambda_verts=1.0,
+        lambda_kl=1e-2,
+        **kwargs
+    ):
         super().__init__(**kwargs)
+        self.tex_size = tex_size
+        self.mse = nn.MSELoss()
+        self.train_dataset = train_dataset
+        self.valid_dataset = valid_dataset
+        self.renderer = Renderer()
+        self.resolution = resolution
+        self.lambda_verts = lambda_verts
+        self.lambda_tex = lambda_tex
+        self.lambda_screen = lambda_screen
+        self.lambda_kl = lambda_kl 
+        self.optimizer_cc = optim.Adam(self.net.module.get_cc_params(), 3e-4, (0.9, 0.999))
     
+
     def train(self):
         if self.np_random_seeds is None:
             self.np_random_seeds = random.sample(range(10000000), k=self.num_epochs)
@@ -69,6 +96,7 @@ class DAVAETrainer(BaseTrainer):
             self.net.train()
         else:
             self.net.eval()
+        dataset = self.train_dataset if mode == 'training' else self.valid_dataset
         dataloader = self.train_dataloader if mode == 'training' else self.valid_dataloader
         trange = tqdm(dataloader,
                       total=len(dataloader),
@@ -78,105 +106,137 @@ class DAVAETrainer(BaseTrainer):
         count = 0
         for batch in trange:
             batch = self._allocate_data(batch)
-
-            verts, view, frontview, targetview = self._get_inputs_targets(batch)
+            batch_size, channel, height, width = batch["avg_tex"].shape
+            vertmean = dataset.vertmean.to(self.device)
+            vertstd = dataset.vertstd.to(self.device)
+            texmean = dataset.texmean.to(self.device)
+            texstd = dataset.texstd.to(self.device)
+            loss_weight_mask = dataset.loss_weight_mask.to(self.device)
 
             if mode == 'training':
-                pred_tex, pred_verts, kl = self.net(frontview, verts, view)
-                
-                pred_tex = (pred_tex * batch['texstd'] + batch['texmean']) / 255.0
-                targetview = (targetview * batch['texstd'] + batch['texmean']) / 255.0
-                frontview = (frontview * batch['texstd'] + batch['texmean']) / 255.0
-
-                # print(pred_tex.max())
-                # print(targetview.max())
-                # print(batch['texmean'].max())
-                # print(batch['texstd'].max())
-
-                # pred_tex *= batch['mask']
-                # targetview *= batch['mask']
-                # print(((pred_tex - targetview)**2).mean())
-
-                losses = self._compute_losses(pred_verts, verts, pred_tex, targetview, batch['texstd'], kl)
-                loss = (torch.stack(losses) * self.loss_weights).sum()
-
+                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["verts"], batch["view"], cams=batch["cams"])
+                # compute loss
+                vert_loss = self.mse(pred_verts, batch["aligned_verts"])
+                pred_verts = pred_verts * vertstd + vertmean
+                pred_tex = (pred_tex * texstd + texmean) / 255.0
+                gt_tex = (gt_tex * texstd + texmean) / 255.0
+                loss_mask = loss_weight_mask.repeat(batch_size, 1, 1, 1)
+                tex_loss = self.mse(pred_tex * batch["mask"], gt_tex * batch["mask"]) * (255**2) / (texstd**2)
+                screen_mask, rast_out = self.renderer.render(
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], loss_mask, self.resolution
+                )
+                pred_screen, rast_out = self.renderer.render(
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                )
+                screen_loss = (
+                    torch.mean((pred_screen - batch["photo"]) ** 2 * screen_mask)
+                    * (255**2)
+                    / (texstd**2)
+                )
+                total_loss = (
+                    args.lambda_verts * vert_loss +
+                    args.lambda_tex * tex_loss +
+                    args.lambda_screen * screen_loss +
+                    args.lambda_kl * kl
+                )
+                # loss backward
                 self.optimizer.zero_grad()
-                loss.backward()
+                self.optimizer_cc.zero_grad()
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), 10)
                 self.optimizer.step()
+                self.optimizer_cc.step()
             else:
                 with torch.no_grad():
-                    pred_tex, pred_verts, kl = self.net(frontview, verts, view)
-                    pred_tex = (pred_tex * batch['texstd'] + batch['texmean']) / 255.0
-                    targetview = (targetview * batch['texstd'] + batch['texmean']) / 255.0
-                    frontview = (frontview * batch['texstd'] + batch['texmean']) / 255.0
-                    # pred_tex *= batch['mask']
-                    # targetview *= batch['mask']
+                    pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["verts"], batch["view"], cams=batch["cams"])
+                    # compute loss
+                    vert_loss = self.mse(pred_verts, batch["aligned_verts"])
+                    pred_verts = pred_verts * vertstd + vertmean
+                    pred_tex = (pred_tex * texstd + texmean) / 255.0
+                    gt_tex = (gt_tex * texstd + texmean) / 255.0
+                    loss_mask = loss_weight_mask.repeat(batch_size, 1, 1, 1)
+                    tex_loss = self.mse(pred_tex * batch["mask"], gt_tex * batch["mask"]) * (255**2) / (texstd**2)
+                    screen_mask, rast_out = self.renderer.render(
+                        batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], loss_mask, self.resolution
+                    )
+                    pred_screen, rast_out = self.renderer.render(
+                        batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                    )
+                    screen_loss = (
+                        torch.mean((pred_screen - batch["photo"]) ** 2 * screen_mask)
+                        * (255**2)
+                        / (texstd**2)
+                    )
+                    total_loss = (
+                        args.lambda_verts * vert_loss +
+                        args.lambda_tex * tex_loss +
+                        args.lambda_screen * screen_loss +
+                        args.lambda_kl * kl
+                    )
 
-
-                    losses = self._compute_losses(pred_verts, verts, pred_tex, targetview, batch['texstd'], kl)
-                    loss = (torch.stack(losses) * self.loss_weights).sum()
-
-            metrics =  self._compute_metrics(pred_tex, targetview)
-
-            batch_size = self.train_dataloader.batch_size if mode == 'training' else self.valid_dataloader.batch_size
-            self._update_log(log, batch_size, loss, losses, metrics)
+            self._update_log(log, batch_size, total_loss, [vert_loss, tex_loss, screen_loss, kl])
             count += batch_size
             trange.set_postfix(**dict((key, f'{value / count: .3f}') for key, value in log.items()))
 
         for key in log:
             log[key] /= count
+
         return log, {'image': frontview, 'label': targetview}, pred_tex
 
     
-    def _compute_losses(
+
+
+    def _init_log(self):
+        log = {}
+        log['Loss'] = 0
+        for loss_name in ['vert_loss', 'tex_loss', 'screen_loss', 'kl_loss']:
+            log[loss_name] = 0
+        return log
+
+
+    def _update_log(
         self,
-        pred_verts: torch.Tensor,
-        verts: torch.Tensor,
-        pred_tex: torch.Tensor,
-        targetview: torch.Tensor,
-        texstd: torch.Tensor,
-        kl: torch.Tensor
+        log: dict,
+        batch_size: int,
+        loss: torch.Tensor,
+        losses: Sequence[torch.Tensor],
     ):
-        losses = []
-        # print(((pred_tex - targetview)**2).mean())
-        for loss_fn in self.loss_fns:
-            if loss_fn.__class__.__name__== 'MeshLoss':
-                losses.append(loss_fn(pred_verts, verts))
-            elif loss_fn.__class__.__name__== 'ScreenLoss':
-                losses.append(loss_fn(pred_tex, targetview, texstd))
-            elif loss_fn.__class__.__name__== 'KLLoss':
-                losses.append(kl)
-            else:
-                raise Exception('Unknown loss function: {}'.format(loss_fn.__class__.__name__))
-        return losses
-
-
-    def _compute_metrics(
-        self,
-        output: torch.Tensor,
-        target: torch.Tensor
-    ):
-        metrics = [metric(output, target) for metric in self.metric_fns]
-        return metrics
-
-
-    def _get_inputs_targets(
-        self,
-        batch: dict
-    ):
-        # return batch['verts'], batch['view'], batch['frontview'], batch['targetview'], batch['mask']
-        return batch['verts'], batch['view'], batch['frontview'], batch['targetview']
+        log['Loss'] += total_loss.item() * batch_size
+        loss_names = ['vert_loss', 'tex_loss', 'screen_loss', 'kl_loss']
+        for name, loss in zip(loss_names, losses):
+            log[name] += loss.item() * batch_size
 
     
     def _allocate_data(
         self,
         batch: dict
     ):
-        batch['verts'] = batch['verts'].to(self.device)
-        batch['view'] = batch['view'].to(self.device)
-        batch['frontview'] = batch['frontview'].to(self.device)
-        batch['targetview'] = batch['targetview'].to(self.device)
-        batch['texmean'] = batch['texmean'].to(self.device)
-        batch['texstd'] = batch['texstd'].to(self.device)
-        # batch['mask'] = batch['mask'].to(self.device)
+        for key in batch:
+            batch[key] = batch[key].to(self.device)
         return batch
+
+
+    def save(self, path):
+        torch.save({
+            'net': self.net.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'optimizer_cc': self.optimizer_cc.state_dict(),
+            'lr_scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler else None,
+            'monitor': self.monitor,
+            'epoch': self.epoch,
+            'random_state': random.getstate(),
+            'np_random_seeds': self.np_random_seeds
+        }, path)
+
+
+    def load(self, path):
+        checkpoint = torch.load(path, map_location=self.device)
+        self.net.load_state_dict(checkpoint['net'])
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.optimizer_cc.load_state_dict(checkpoint['optimizer_cc'])
+        if checkpoint['lr_scheduler']:
+            self.lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        self.monitor = checkpoint['monitor']
+        self.epoch = checkpoint['epoch'] + 1
+        random.setstate(checkpoint['random_state'])
+        self.np_random_seeds = checkpoint['np_random_seeds']

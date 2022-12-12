@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 
-class VanillaLoader(DataLoader):
+class VanillaDataLoader(DataLoader):
     """
     Args:
         dataset (Dataset): Dataset from which to load the data.
