@@ -16,7 +16,7 @@ from data.dataset.utils import *
 
 
 individual = 'm--20181017--0000--002914589--GHS'
-cam_not_use = ['400008', '400006', '400010', '400031', '400055', '400059', '400025']
+cam_not_use = ['400008', '400006', '400007', '400010', '400015', '400031', '400037', '400053', '400055', '400059', '400025', '400041']
 
 
 class MFINDDataset(BaseDataset):
@@ -107,7 +107,7 @@ class MFINDDataset(BaseDataset):
         # sampling for validation and debugging
         if self.type=='valid':
             random.seed(0)
-            self.framelist = random.sample(self.framelist, 1000)
+            self.framelist = random.sample(self.framelist, 400)
         if self.debug:
             self.framelist = random.sample(self.framelist, 40)
 

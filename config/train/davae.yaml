@@ -1,6 +1,6 @@
 main:
     random_seed: 0
-    saved_dir: './saved/tmp'
+    saved_dir: './saved/davae'
 
 dataset:
     name: 'MFINDDataset'
@@ -12,7 +12,7 @@ dataset:
 dataloader:
     name: 'VanillaDataLoader'
     kwargs:
-        train_batch_size: 6
+        train_batch_size: 4
         valid_batch_size: 1
         shuffle: true
         num_workers: 8
@@ -48,7 +48,7 @@ monitor:
     kwargs:
         mode: 'min'
         target: 'Loss'
-        saved_freq: 10
+        saved_freq: 4
         early_stop: 0
 
 trainer:
