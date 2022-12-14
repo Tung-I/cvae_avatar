@@ -32,7 +32,7 @@ class DAVAETrainer(BaseTrainer):
         self.mse = nn.MSELoss()
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
-        self.renderer = Renderer()
+        self.renderer = Renderer(self.device)
         self.resolution = resolution
         self.lambda_verts = lambda_verts
         self.lambda_tex = lambda_tex

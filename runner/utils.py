@@ -14,8 +14,8 @@ def check_path(path):
 
 
 class Renderer:
-    def __init__(self):
-        self.glctx = dr.RasterizeGLContext()
+    def __init__(self, device):
+        self.glctx = dr.RasterizeGLContext(device=device)
 
     def render(self, M, pos, pos_idx, uv, uv_idx, tex, resolution=[2048, 1334]):
         ones = torch.ones((pos.shape[0], pos.shape[1], 1)).to(pos.device)
