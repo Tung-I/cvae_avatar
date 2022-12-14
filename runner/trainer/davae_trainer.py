@@ -242,7 +242,7 @@ class DAVAETrainer(BaseTrainer):
         batch: dict
     ):
         for key in batch:
-            batch[key] = batch[key].cuda()
+            batch[key] = batch[key].to(self.device)
         return batch
 
 
