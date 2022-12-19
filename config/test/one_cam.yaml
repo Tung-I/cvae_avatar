@@ -1,6 +1,7 @@
 main:
     random_seed: 0
     saved_dir: './output'
+    loaded_path: './saved/davae/checkpoints/model_best.pth'
 
 dataset:
     name: 'InferDataset'
@@ -27,10 +28,5 @@ predictor:
     name: 'DAVAEPredictor'
     kwargs:
         tex_size: 1024
-        resolution: [2048, 1334]
-        lambda_verts: 1.0
-        lambda_tex: 1.0
-        lambda_screen: 1.0
-        lambda_kl: 0.01 
+        resolution: [2048, 1334]        
         device: 'cuda:0'
-        num_epochs: 48

@@ -16,7 +16,7 @@ from data.dataset.utils import *
 
 
 individual = 'm--20181017--0000--002914589--GHS'
-target_exp = 'E001_Neutral_Eyes_Open'
+target_exp = 'E025_Shh'
 target_cam = '400002'
 
 
@@ -30,7 +30,7 @@ class InferDataset(BaseDataset):
         self.base_dir = '{}/{}'.format(str(self.base_dir), individual)
         self.tex_size = tex_size
 
-        self.individual = individual
+        self.target_individual = individual
         self.target_exp = target_exp
         self.target_cam = target_cam
 

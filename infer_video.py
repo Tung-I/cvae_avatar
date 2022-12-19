@@ -5,6 +5,7 @@ import sys
 import torch
 import random
 import yaml
+import imageio
 from box import Box
 from pathlib import Path
 
@@ -20,10 +21,7 @@ def main(args):
     saved_dir = Path(config.main.saved_dir)
     if not saved_dir.is_dir():
         saved_dir.mkdir(parents=True)
-    logging.info(f'Save the config to "{config.main.saved_dir}".')
-    with open(saved_dir / 'config.yaml', 'w+') as f:
-        yaml.dump(config.to_dict(), f, default_flow_style=False)
-
+    
     # Make experiment results deterministic.
     random.seed(config.main.random_seed)
     torch.manual_seed(random.getstate()[1][1])
@@ -33,68 +31,50 @@ def main(args):
 
     if not torch.cuda.is_available():
         raise RuntimeError("cuda unavailable.")
-    device = torch.device(config.trainer.kwargs.device)
+    device = torch.device(config.predictor.kwargs.device)
 
     # datasets
-    logging.info('Create the training and validation datasets.')
+    logging.info('Create the datasets.')
     base_dir = Path(config.dataset.kwargs.base_dir)
-    config.dataset.kwargs.update(base_dir=base_dir, type='train')
-    train_dataset = _get_instance(data.dataset, config.dataset)
-    config.dataset.kwargs.update(base_dir=base_dir, type='valid')
-    valid_dataset = _get_instance(data.dataset, config.dataset)
-
-    n_cameras = len(train_dataset.cameras)
+    config.dataset.kwargs.update(base_dir=base_dir, type='test')
+    test_dataset = _get_instance(data.dataset, config.dataset)
+    n_cameras = len(test_dataset.cameras)
 
     # dataloaders
-    logging.info('Create the training and validation dataloaders.')
-    train_batch_size, valid_batch_size = config.dataloader.kwargs.pop('train_batch_size'), config.dataloader.kwargs.pop('valid_batch_size')
-    config.dataloader.kwargs.update(collate_fn=None, batch_size=train_batch_size)
-    train_dataloader = _get_instance(data.dataloader, config.dataloader, train_dataset)
-    config.dataloader.kwargs.update(batch_size=valid_batch_size)
-    valid_dataloader = _get_instance(data.dataloader, config.dataloader, valid_dataset)
+    logging.info('Create the dataloader.')
+    batch_size = config.dataloader.kwargs.pop('batch_size')
+    config.dataloader.kwargs.update(collate_fn=None, batch_size=batch_size)
+    test_dataloader = _get_instance(data.dataloader, config.dataloader, test_dataset)
 
     # model
     logging.info('Create the network architecture.')
     config.net.kwargs.update(n_cams=n_cameras)
     net = _get_instance(model.net, config.net)
-    logging.info('Create the optimizer.')
-    optimizer = _get_instance(torch.optim, config.optimizer, net.get_model_params())
-    logging.info('Create the learning rate scheduler.')
-    lr_scheduler = _get_instance(torch.optim.lr_scheduler, config.lr_scheduler, optimizer) if config.get('lr_scheduler') else None
 
-    # logger & monitor
-    logging.info('Create the logger.')
-    config.logger.kwargs.update(log_dir=saved_dir / 'log', dummy_input=torch.randn(tuple(config.logger.kwargs.dummy_input)))
-    logger = _get_instance(callback.loggers, config.logger)
-    logging.info('Create the monitor.')
-    config.monitor.kwargs.update(checkpoints_dir=saved_dir / 'checkpoints')
-    monitor = _get_instance(callback.monitor, config.monitor)
-
-    # trainer
-    logging.info('Create the trainer.')
+    # predictor
+    logging.info('Create the predictor.')
     kwargs = {'device': device,
-                'train_dataloader': train_dataloader,
-                'valid_dataloader': valid_dataloader,
-                'train_dataset': train_dataset,
-                'valid_dataset': valid_dataset,
-                'net': net,
-                'optimizer': optimizer,
-                'lr_scheduler': lr_scheduler,
-                'logger': logger,
-                'monitor': monitor}
-    config.trainer.kwargs.update(kwargs)
-    trainer = _get_instance(runner.trainer, config.trainer)
+                'test_dataloader': test_dataloader,
+                'test_dataset': test_dataset,
+                'net': net
+            }
+    config.predictor.kwargs.update(kwargs)
+    predictor = _get_instance(runner.predictor, config.predictor)
 
-    # training
+    # load model
     loaded_path = config.main.get('loaded_path')
-    if loaded_path:
-        logging.info(f'Load the previous checkpoint from "{loaded_path}".')
-        trainer.load(Path(loaded_path))
-        logging.info('Resume training.')
-    else:
-        logging.info('Start training.')
-    trainer.train()
-    logging.info('End training.')
+    logging.info(f'Load the previous checkpoint from "{loaded_path}".')
+    predictor.load(Path(loaded_path))
+
+    gt_frames, pred_frames = predictor.predict()
+    print("Inference speed: {}".format(predictor.avg_infer_time))
+    logging.info('End inference.')
+
+    # save video
+    save_path = "{}/{}".format(saved_dir, 'gt.mp4')
+    imageio.mimwrite(save_path, gt_frames, fps=30, quality=8)
+    save_path = "{}/{}".format(saved_dir, 'output.mp4')
+    imageio.mimwrite(save_path, pred_frames, fps=30, quality=8)
 
 
 def _get_instance(module, config, *args):

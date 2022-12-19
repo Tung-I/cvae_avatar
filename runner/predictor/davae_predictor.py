@@ -33,13 +33,13 @@ class DAVAEPredictor(BasePredictor):
     def predict(self):
         # Reset the numpy random seed.
         if self.np_random_seeds is None:
-            self.np_random_seeds = random.sample(range(10000000), k=self.num_epochs)
-        np.random.seed(self.np_random_seeds[self.epoch - 1])
+            self.np_random_seeds = 0
+        np.random.seed(self.np_random_seeds)
 
-        logging.info(f'Infer: {}/{}/{}'.format(
-            self.test_dataset.individual,
-            self.test_dataset.exp,
-            self.test_dataset.cam
+        logging.info('Infer: {}/{}/{}'.format(
+            self.test_dataset.target_individual,
+            self.test_dataset.target_exp,
+            self.test_dataset.target_cam
             ))
 
         self.net.eval()
@@ -87,7 +87,7 @@ class DAVAEPredictor(BasePredictor):
             pred_frames.append(pred_screen)
 
         self.avg_infer_time = total_infer_time / len(dataloader)
-        self.logger.close()
+        return gt_frames, pred_frames
 
     
     def _allocate_data(self, batch):
