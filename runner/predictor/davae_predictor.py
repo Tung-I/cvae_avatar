@@ -1,118 +1,104 @@
-import torch
 import logging
-from tqdm import tqdm
 import random
 import copy
 import numpy as np
 import sys
 import time
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from tqdm import tqdm
+from typing import Callable, Sequence, Union, List
 
 from runner.predictor import BasePredictor
+from runner.utils import Renderer
 
 
 class DAVAEPredictor(BasePredictor):
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        tex_size,
+        resolution,
+        test_dataset, 
+        **kwargs
+    ):
         super().__init__(**kwargs)
-        self.pred_frames = []
-        self.gt_frames = []
-        self.base_frames = []
-        self.infer_speed = None
-    
+        self.tex_size = tex_size
+        self.test_dataset = test_dataset
+        self.renderer = Renderer(self.device)
+        self.resolution = resolution
+        self.avg_infer_time = None
+
     def predict(self):
+        # Reset the numpy random seed.
+        if self.np_random_seeds is None:
+            self.np_random_seeds = random.sample(range(10000000), k=self.num_epochs)
+        np.random.seed(self.np_random_seeds[self.epoch - 1])
+
+        logging.info(f'Infer: {}/{}/{}'.format(
+            self.test_dataset.individual,
+            self.test_dataset.exp,
+            self.test_dataset.cam
+            ))
+
+        self.net.eval()
+        dataset = self.test_dataset 
         dataloader = self.test_dataloader
         trange = tqdm(dataloader,
                       total=len(dataloader),
                       desc='test')
-
-        log = self._init_log()
-        count = 0
-        total_time = 0
-
-        ##################
-        # flag = time.time()
-        ##################
+        # infer
+        gt_frames = []
+        pred_frames = []
+        total_infer_time = 0
         for batch in trange:
-            ##################
-            flag = time.time()
-            ##################
             batch = self._allocate_data(batch)
+            batch_size, channel, height, width = batch["avg_tex"].shape
+            gt_tex = batch["tex"]
+            vertmean = torch.tensor(dataset.vertmean, dtype=torch.float32).view((1, -1, 3))
+            vertmean = vertmean.to(self.device)
+            vertstd = dataset.vertstd
+            texmean = torch.tensor(dataset.texmean).permute((2, 0, 1))[None, ...]
+            texmean = texmean.to(self.device)
+            texstd = dataset.texstd
 
-            verts, view, frontview, targetview = self._get_inputs_targets(batch)
-
+            time_flag = time.time()
             with torch.no_grad():
-                pred_tex, pred_verts, kl = self.net(frontview, verts, view)
-                pred_tex = (pred_tex * batch['texstd'] + batch['texmean']) / 255.0
-                targetview = (targetview * batch['texstd'] + batch['texmean']) / 255.0
-                frontview = (frontview * batch['texstd'] + batch['texmean']) / 255.0
-            ##################
-            total_time  += (time.time() - flag)
-            ##################
-            metrics =  self._compute_metrics(pred_tex, targetview)
+                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cam"])
+                pred_verts = pred_verts * vertstd + vertmean
+                pred_tex = (pred_tex * texstd + texmean) / 255.0
+                gt_tex = (gt_tex * texstd + texmean) / 255.0
 
-            batch_size = self.test_dataloader.batch_size
-            self._update_log(log, batch_size, metrics)
-            count += batch_size
-            trange.set_postfix(**dict((key, f'{value / count: .3f}') for key, value in log.items()))
+                pred_screen, rast_out = self.renderer.render(
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                )
+            total_infer_time += time.time() - time_flag
 
-            # test_batch = {'image': frontview, 'label': targetview}
-            # test_outputs = pred_tex
-            logging.info(f'test log: {log}.')
+            gt_tex *= 255
+            pred_tex = torch.clamp(pred_tex*255, 0, 255)
 
-            pred_frame = pred_tex * 255.
-            pred_frame -= pred_frame.min()
-            pred_frame = pred_frame.squeeze().permute(1, 2, 0).cpu().numpy()
-            self.pred_frames.append(pred_frame.astype(np.uint8))
+            gt_screen = batch["photo"] * 255
+            pred_screen = torch.clamp(pred_screen*255, 0, 255)
 
-            gt_frame = targetview * 255.
-            gt_frame -= gt_frame.min()
-            gt_frame = gt_frame.squeeze().permute(1, 2, 0).cpu().numpy()
-            self.gt_frames.append(gt_frame.astype(np.uint8))
+            gt_screen = gt_screen.squeeze().cpu().numpy().astype(np.uint8)
+            pred_screen = pred_screen.squeeze().cpu().numpy().astype(np.uint8)
+            gt_frames.append(gt_screen)
+            pred_frames.append(pred_screen)
 
-            base_frame = frontview * 255.
-            base_frame -= base_frame.min()
-            base_frame = base_frame.squeeze().permute(1, 2, 0).cpu().numpy()
-            self.base_frames.append(base_frame.astype(np.uint8))
-        
-            if count > 720-1:
-                break
-
-
-        for key in log:
-            log[key] /= count
-
-        ####################################
-        # total_time  = time.time() - flag
-        ###################################
-        # self.infer_speed = total_time / count
-        self.infer_speed = total_time / (count+1)
-
-
-    def _compute_metrics(
-        self,
-        output: torch.Tensor,
-        target: torch.Tensor
-    ):
-        metrics = [metric(output, target) for metric in self.metric_fns]
-        return metrics
-
-
-    def _get_inputs_targets(
-        self,
-        batch: dict
-    ):
-        # return batch['verts'], batch['view'], batch['frontview'], batch['targetview'], batch['mask']
-        return batch['verts'], batch['view'], batch['frontview'], batch['targetview']
+        self.avg_infer_time = total_infer_time / len(dataloader)
+        self.logger.close()
 
     
-    def _allocate_data(
-        self,
-        batch: dict
-    ):
-        batch['verts'] = batch['verts'].to(self.device)
-        batch['view'] = batch['view'].to(self.device)
-        batch['frontview'] = batch['frontview'].to(self.device)
-        batch['targetview'] = batch['targetview'].to(self.device)
-        batch['texmean'] = batch['texmean'].to(self.device)
-        batch['texstd'] = batch['texstd'].to(self.device)
-        # batch['mask'] = batch['mask'].to(self.device)
+    def _allocate_data(self, batch):
+        for key in batch:
+            batch[key] = batch[key].to(self.device)
         return batch
+
+
+    def load(self, path):
+        checkpoint = torch.load(path, map_location=self.device)
+        self.net.load_state_dict(checkpoint['net'])
+        random.setstate(checkpoint['random_state'])
+        self.np_random_seeds = checkpoint['np_random_seeds']
+

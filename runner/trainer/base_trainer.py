@@ -60,4 +60,17 @@ class BaseTrainer:
         mode: str
     ):
         raise NotImplementedError
+    
+    def _allocate_data(
+        self,
+        batch: dict
+    ):
+        raise NotImplementedError
+
+    def save(self, path):
+        raise NotImplementedError
+
+
+    def load(self, path):
+        raise NotImplementedError
 
