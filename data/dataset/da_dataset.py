@@ -94,7 +94,7 @@ class DomainAdaptationDataset(BaseDataset):
         # sampling for validation and debugging
         if self.type=='valid':
             random.seed(0)
-            self.framelist = random.sample(self.framelist, 400)
+            self.framelist = random.sample(self.framelist, 600)
         if self.debug:
             self.framelist = random.sample(self.framelist, 40)
 
@@ -142,11 +142,7 @@ class DomainAdaptationDataset(BaseDataset):
 
         # input face image
         path = "{}/{}/{}/{}.png".format(self.photopath, ep, '400048', frame)
-        photo = np.asarray(Image.open(path), dtype=np.float32)
-        im_mask = photo==0
-        photo -= self.texmean
-        photo /- self.texstd
-        photo[im_mask] = 0.
+        photo = np.asarray(Image.open(path), dtype=np.float32) / 255.
         up_face = photo[640:640+600, 240:240+600]
         up_face = cv2.resize(up_face, (self.im_size, self.im_size)).transpose((2, 0, 1))
         low_face = photo[1024:1024+512, 280:280+512]

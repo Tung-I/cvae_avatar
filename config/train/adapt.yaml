@@ -8,7 +8,7 @@ dataset:
         base_dir: '/home/tungi/datasets/mf_individuals'
         im_size: 512
         tex_size: 1024
-        debug: true
+        debug: false
             
 dataloader:
     name: 'VanillaDataLoader'
@@ -57,7 +57,7 @@ monitor:
     kwargs:
         mode: 'min'
         target: 'Loss'
-        saved_freq: 2
+        saved_freq: 4
         early_stop: 0
 
 trainer:
@@ -67,4 +67,4 @@ trainer:
         lambda_rec: 1.0
         lambda_kl: 0.1 
         device: 'cuda:0'
-        num_epochs: 12
+        num_epochs: 24

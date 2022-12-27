@@ -65,13 +65,24 @@ def main(args):
     pretrained_path = config.encoder.pop('path')
     config.encoder.kwargs.update(n_cams=n_cameras)
     encoder = _get_instance(model.net, config.encoder)
-    model_state_dict = encoder.state_dict()
     logging.info(f'Load the pretrained encoder weights from "{pretrained_path}".')
     pretrained_dict = torch.load(pretrained_path)['net']
-    enc_dict = {k: v for k, v in pretrained_dict.items() if 'enc.' in k}
-    logging.info(f'{enc_dict.keys()}')
-    model_state_dict.update(enc_dict)
-    encoder.load_state_dict(model_state_dict)
+    encoder.load_state_dict(pretrained_dict)
+    encoder = encoder.to(device).eval()
+    for param in encoder.parameters():
+        param.requires_grad = False
+
+    # model_state_dict = encoder.state_dict()
+    # pretrained_dict = torch.load(pretrained_path)['net']
+    # enc_dict = {k: v for k, v in pretrained_dict.items() if 'enc.' in k}
+    # logging.info(f'{enc_dict.keys()}')
+    # model_state_dict.update(enc_dict)
+    # encoder.load_state_dict(model_state_dict)
+    # encoder = encoder.to(device).eval()
+    # for k, param in encoder.named_parameters():
+    #     if param.requires_grad is True:
+    #         print(k)
+    # raise Exception(' ')
 
     # logger & monitor
     logging.info('Create the logger.')

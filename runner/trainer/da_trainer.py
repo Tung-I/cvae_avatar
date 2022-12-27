@@ -116,7 +116,7 @@ class DomainAdaptationTrainer(BaseTrainer):
                 retar_loss = self.mse(z, mapped_z)
                 rec_loss = (
                     torch.mean((up_face - batch["up_face"]) ** 2) + torch.mean((low_face - batch["low_face"]) ** 2)
-                ) * 0.5
+                ) * (255**2) * 0.5
                 total_loss = (
                     self.lambda_rec * rec_loss +
                     self.lambda_retar * retar_loss +
@@ -136,7 +136,7 @@ class DomainAdaptationTrainer(BaseTrainer):
                     retar_loss = self.mse(z, mapped_z)
                     rec_loss = (
                         torch.mean((up_face - batch["up_face"]) ** 2) + torch.mean((low_face - batch["low_face"]) ** 2)
-                    ) * 0.5
+                    ) * (255**2) * 0.5
                     total_loss = (
                         self.lambda_rec * rec_loss +
                         self.lambda_retar * retar_loss +
@@ -151,11 +151,14 @@ class DomainAdaptationTrainer(BaseTrainer):
         for key in log:
             log[key] /= count
 
+        up_face = torch.clamp(up_face*255, 0, 255)
+        low_face = torch.clamp(low_face*255, 0, 255)
+
         
         output = {
-            "up_face": batch["up_face"], 
+            "up_face": batch["up_face"] * 255., 
             "pred_up_face": up_face,
-            "low_face": batch["low_face"],
+            "low_face": batch["low_face"] * 255.,
             "pred_low_face": low_face
         }
 
