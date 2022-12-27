@@ -8,13 +8,122 @@ from model.net.base_net import BaseNet
 from model.net.davae_utils import *
 
 
+class DomainAdaptationVAE(nn.Module):
+    def __init__(
+        self,
+        im_size=512,
+        n_latent=256,
+        res=False,
+        non=False,
+        bilinear=False,
+    ):
+        super(DomainAdaptationVAE, self).__init__()
+        z_dim = n_latent
+        self.enc = DomainAdaptationEncoder(
+            im_size, n_latent=z_dim, res=res
+        )
+        self.dec = DomainAdaptationDecoder(
+            im_size, z_dim=z_dim, res=res, non=non, bilinear=bilinear
+        )
+        self.l_map = LinearWN(256, 256)
+
+    def forward(self, up_face, low_face):
+        mean, logstd = self.enc(up_face, low_face)
+        mean = mean * 0.1
+        logstd = logstd * 0.01
+        kl = 0.5 * torch.mean(torch.exp(2 * logstd) + mean**2 - 1.0 - 2 * logstd)
+        std = torch.exp(logstd)
+        eps = torch.randn_like(mean)
+        z = mean + std * eps
+        up_face, low_face = self.dec(z)
+
+        mapped_z = self.l_map(z)
+
+        return up_face, low_face, kl, mapped_z
+
+    def get_model_params(self):
+        params = []
+        params += list(self.enc.parameters())
+        params += list(self.dec.parameters())
+        params += list(self.l_map.parameters())
+        return params
+
+    # def encode(self, up_face, low_face):
+    #     mean, logstd = self.enc(up_face, low_face)
+    #     mean = mean * 0.1
+    #     logstd = logstd * 0.01
+    #     std = torch.exp(logstd)
+    #     eps = torch.randn_like(mean)
+    #     z = mean + std * eps
+    #     mapped_z = self.LinearMapping(z)
+    #     return mapped_z
+
+
+class DomainAdaptationDecoder(nn.Module):
+    def __init__(
+        self, im_size, z_dim=256, res=False, non=False, bilinear=False
+    ):
+        super(DomainAdaptationDecoder, self).__init__()
+        nhidden = z_dim * 4 * 4 if im_size == 1024 else z_dim * 2 * 2
+        self.upface_decoder = TextureDecoder(
+            im_size, z_dim, res=res, non=non, bilinear=bilinear
+        )
+        self.lowface_decoder = TextureDecoder(
+            im_size, z_dim, res=res, non=non, bilinear=bilinear
+        )
+    
+        self.z_fc = LinearWN(z_dim, 256)
+
+
+        self.upface_fc = LinearWN(256, nhidden)
+        self.lowface_fc = LinearWN(256, nhidden)
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
+
+        self.apply(lambda x: glorot(x, 0.2))
+        glorot(self.upface_decoder.upsample[-1].conv2, 1.0)
+        glorot(self.lowface_decoder.upsample[-1].conv2, 1.0)
+
+    def forward(self, z):
+        z_code = self.relu(self.z_fc(z))
+        upface_code = self.relu(self.upface_fc(z_code))
+        lowface_code = self.relu(self.lowface_fc(z_code))
+        up_face = self.upface_decoder(upface_code)
+        low_face = self.lowface_decoder(lowface_code)
+        return up_face, low_face
+
+
+class DomainAdaptationEncoder(nn.Module):
+    def __init__(self, inp_size=512, n_latent=256, res=False):
+        super(DomainAdaptationEncoder, self).__init__()
+        self.n_latent = n_latent
+        ntexture_feat = 2048 if inp_size == 1024 else 512
+        self.upface_encoder = TextureEncoder(res=res)
+        self.lowface_encoder = TextureEncoder(res=res)
+        self.upface_fc = LinearWN(ntexture_feat, 256)
+        self.lowface_fc = LinearWN(ntexture_feat, 256)
+        
+        self.fc = LinearWN(512, n_latent * 2)
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
+
+        self.apply(lambda x: glorot(x, 0.2))
+        glorot(self.fc, 1.0)
+
+    def forward(self, up_face, low_face):
+        up_feat = self.relu(self.upface_fc(self.upface_encoder(up_face)))
+        low_feat = self.relu(self.lowface_fc(self.lowface_encoder(low_face)))
+        feat = torch.cat((up_feat, low_feat), -1)
+        latent = self.fc(feat)
+        return latent[:, : self.n_latent], latent[:, self.n_latent :]
+
+
+
 class DeepAppearanceVAE(nn.Module):
     def __init__(
         self,
         tex_size=1024,
         mesh_inp_size=21918,
         mode="vae",
-        n_latent=128,
+        n_latent=256,
         n_cams=38,
         res=False,
         non=False,
@@ -68,6 +177,19 @@ class DeepAppearanceVAE(nn.Module):
 
     def get_cc_params(self):
         return self.cc.parameters()
+
+    def get_latent(self, avgtex, mesh):
+        b, n, _ = mesh.shape
+        mesh = mesh.view((b, -1))
+        mean, logstd = self.enc(avgtex, mesh)
+        mean = mean * 0.1
+        logstd = logstd * 0.01
+        std = torch.exp(logstd)
+        eps = torch.randn_like(mean)
+        z = mean + std * eps
+
+        return z
+    
 
 
 class DeepAppearanceDecoder(nn.Module):

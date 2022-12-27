@@ -48,6 +48,28 @@ class BaseLogger:
         raise NotImplementedError
 
 
+class DomainAdaptationLogger(BaseLogger):
+    def __init__(
+        self,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+
+    def _add_images(
+        self,
+        epoch: int,
+        train_output: dict,
+        valid_output: dict
+    ):
+        up_face = make_grid(train_output['up_face'], nrow=1, normalize=True, scale_each=True, pad_value=1)
+        pred_up_face = make_grid(train_output['pred_up_face'], nrow=1, normalize=True, scale_each=True, pad_value=1)
+        low_face = make_grid(train_output['low_face'], nrow=1, normalize=True, scale_each=True, pad_value=1)
+        pred_low_face = make_grid(train_output['pred_low_face'], nrow=1, normalize=True, scale_each=True, pad_value=1)
+
+        train_grid = torch.cat((up_face, pred_up_face, low_face, pred_low_face), dim=-1)
+        self.writer.add_image('train', train_grid, epoch)
+
+
 class DAVAELogger(BaseLogger):
     def __init__(
         self,

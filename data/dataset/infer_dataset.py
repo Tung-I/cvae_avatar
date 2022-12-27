@@ -16,8 +16,8 @@ from data.dataset.utils import *
 
 
 individual = 'm--20181017--0000--002914589--GHS'
-target_exp = 'E025_Shh'
-target_cam = '400002'
+target_exp = 'E057_Cheeks_Puffed'
+target_cam = '400063'
 
 
 class InferDataset(BaseDataset):

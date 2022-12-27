@@ -51,7 +51,9 @@ class DAVAEPredictor(BasePredictor):
         # infer
         gt_frames = []
         pred_frames = []
+        avgtex_frames = []
         total_infer_time = 0
+        count = 0
         for batch in trange:
             batch = self._allocate_data(batch)
             batch_size, channel, height, width = batch["avg_tex"].shape
@@ -70,24 +72,41 @@ class DAVAEPredictor(BasePredictor):
                 pred_tex = (pred_tex * texstd + texmean) / 255.0
                 gt_tex = (gt_tex * texstd + texmean) / 255.0
 
+                # pred_screen, rast_out = self.renderer.render(
+                #     batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                # )
+                avg_tex = batch["avg_tex"]
+                avg_tex = (avg_tex * texstd + texmean) / 255.0
                 pred_screen, rast_out = self.renderer.render(
-                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], avg_tex, self.resolution
                 )
-            total_infer_time += time.time() - time_flag
 
+
+            if count > 0:
+                total_infer_time += time.time() - time_flag
+
+            # gt_screen & pred_screen
             gt_tex *= 255
             pred_tex = torch.clamp(pred_tex*255, 0, 255)
-
             gt_screen = batch["photo"] * 255
             pred_screen = torch.clamp(pred_screen*255, 0, 255)
-
             gt_screen = gt_screen.squeeze().cpu().numpy().astype(np.uint8)
             pred_screen = pred_screen.squeeze().cpu().numpy().astype(np.uint8)
             gt_frames.append(gt_screen)
             pred_frames.append(pred_screen)
+            
+            # avg tex
+            avg_tex = batch["avg_tex"]
+            # mask = avg_tex == 0
+            avg_tex = (avg_tex * texstd + texmean)
+            # avg_tex[mask] = 0.0
+            avg_tex = avg_tex.squeeze().permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+            avgtex_frames.append(np.flip(avg_tex, 0))
 
-        self.avg_infer_time = total_infer_time / len(dataloader)
-        return gt_frames, pred_frames
+            count += 1
+
+        self.avg_infer_time = total_infer_time / (len(dataloader) - 1)
+        return gt_frames, pred_frames, avgtex_frames
 
     
     def _allocate_data(self, batch):

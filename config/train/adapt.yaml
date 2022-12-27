@@ -1,0 +1,70 @@
+main:
+    random_seed: 0
+    saved_dir: './saved/da'
+
+dataset:
+    name: 'DomainAdaptationDataset'
+    kwargs:
+        base_dir: '/home/tungi/datasets/mf_individuals'
+        im_size: 512
+        tex_size: 1024
+        debug: true
+            
+dataloader:
+    name: 'VanillaDataLoader'
+    kwargs:
+        train_batch_size: 4
+        valid_batch_size: 1
+        shuffle: true
+        num_workers: 8
+
+net:
+    name: 'DomainAdaptationVAE'
+    kwargs:
+        im_size: 512
+        n_latent: 256
+        res: true
+
+encoder:
+    name: 'DeepAppearanceVAE'
+    kwargs:
+        tex_size: 1024
+        mesh_inp_size: 21918
+        n_latent: 256
+        res: true
+    path: "./saved/davae/checkpoints/model_32.pth"
+        
+optimizer:
+    name: 'Adam'
+    kwargs:
+        lr: 0.0003
+        weight_decay: 0
+        amsgrad: false
+
+lr_scheduler:
+    name: StepLR
+    kwargs:
+        step_size: 1
+        gamma: 0.95
+
+logger:
+    name: 'DomainAdaptationLogger'
+    kwargs:
+        dummy_input: [16, 1, 128, 128]
+
+monitor:
+    name: 'Monitor'
+    kwargs:
+        mode: 'min'
+        target: 'Loss'
+        saved_freq: 2
+        early_stop: 0
+
+trainer:
+    name: 'DomainAdaptationTrainer'
+    kwargs:
+        lambda_retar: 0.1
+        lambda_rec: 1.0
+        lambda_kl: 0.1 
+        device: 'cuda:0'
+        num_epochs: 12

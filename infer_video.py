@@ -66,7 +66,7 @@ def main(args):
     logging.info(f'Load the previous checkpoint from "{loaded_path}".')
     predictor.load(Path(loaded_path))
 
-    gt_frames, pred_frames = predictor.predict()
+    gt_frames, pred_frames, avgtex_frames = predictor.predict()
     print("Inference speed: {}".format(predictor.avg_infer_time))
     logging.info('End inference.')
 
@@ -75,6 +75,8 @@ def main(args):
     imageio.mimwrite(save_path, gt_frames, fps=30, quality=8)
     save_path = "{}/{}".format(saved_dir, 'output.mp4')
     imageio.mimwrite(save_path, pred_frames, fps=30, quality=8)
+    save_path = "{}/{}".format(saved_dir, 'input.mp4')
+    imageio.mimwrite(save_path, avgtex_frames, fps=30, quality=8)
 
 
 def _get_instance(module, config, *args):
