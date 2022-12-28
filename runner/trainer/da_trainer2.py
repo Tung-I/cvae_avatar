@@ -131,9 +131,9 @@ class DomainAdaptationTrainer2(BaseTrainer):
 
             else:
                 with torch.no_grad():
-                    up_face, low_face, kl, mapped_z = self.net(batch['up_face'], batch['low_face'])
-                    z = self.pretrained_enc.get_latent(batch["avg_tex"], batch["aligned_verts"])
-                    retar_loss = self.mse(z, mapped_z)
+                    up_face, low_face, kl, mapped_mean, mapped_logstd  = self.net(batch['up_face'], batch['low_face'])
+                    mean, logstd = self.pretrained_enc.encode(batch["avg_tex"], batch["aligned_verts"])
+                    retar_loss = (self.mse(mean, mapped_mean) + self.mse(logstd, mapped_logstd)) * 0.5
                     rec_loss = (
                         torch.mean((up_face - batch["up_face"]) ** 2) + torch.mean((low_face - batch["low_face"]) ** 2)
                     ) * (255**2) * 0.5
