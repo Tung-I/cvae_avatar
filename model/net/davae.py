@@ -8,6 +8,50 @@ from model.net.base_net import BaseNet
 from model.net.davae_utils import *
 
 
+class DomainAdaptationVAE2(nn.Module):
+    def __init__(
+        self,
+        im_size=512,
+        n_latent=256,
+        res=False,
+        non=False,
+        bilinear=False,
+    ):
+        super(DomainAdaptationVAE2, self).__init__()
+        z_dim = n_latent
+        self.enc = DomainAdaptationEncoder(
+            im_size, n_latent=z_dim, res=res
+        )
+        self.dec = DomainAdaptationDecoder(
+            im_size, z_dim=z_dim, res=res, non=non, bilinear=bilinear
+        )
+        self.mean_map = LinearWN(256, 256)
+        self.logstd_map = LinearWN(256, 256)
+
+    def forward(self, up_face, low_face):
+        latent_mean, latent_logstd = self.enc(up_face, low_face)
+        mean = latent_mean * 0.1
+        logstd = latent_logstd * 0.01
+        kl = 0.5 * torch.mean(torch.exp(2 * logstd) + mean**2 - 1.0 - 2 * logstd)
+        std = torch.exp(logstd)
+        eps = torch.randn_like(mean)
+        z = mean + std * eps
+        up_face, low_face = self.dec(z)
+
+        mapped_mean = self.mean_map(latent_mean)
+        mapped_logstd = self.logstd_map(latent_logstd)
+
+        return up_face, low_face, kl, mapped_mean, mapped_logstd
+
+    def get_model_params(self):
+        params = []
+        params += list(self.enc.parameters())
+        params += list(self.dec.parameters())
+        params += list(self.mean_map.parameters())
+        params += list(self.logstd_map.parameters())
+        return params
+
+
 class DomainAdaptationVAE(nn.Module):
     def __init__(
         self,
@@ -189,6 +233,13 @@ class DeepAppearanceVAE(nn.Module):
         z = mean + std * eps
 
         return z
+
+    def encode(self, avgtex, mesh):
+        b, n, _ = mesh.shape
+        mesh = mesh.view((b, -1))
+        mean, logstd = self.enc(avgtex, mesh)
+
+        return mean, logstd
     
 
 
