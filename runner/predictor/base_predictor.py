@@ -14,23 +14,15 @@ class BasePredictor:
     def __init__(
         self,
         device: torch.device,
-        test_dataloader: torch.utils.data.DataLoader,
-        net: torch.nn.Module,
+        test_dataloader: torch.utils.data.DataLoader
     ):
         self.device = device
         self.test_dataloader = test_dataloader
-        self.net = net.to(device)
         self.np_random_seeds = None
 
     def predict(self):
         raise NotImplementedError
 
-    def _allocate_data(
-        self,
-        batch: dict
-    ):
-        raise NotImplementedError
-
-    def load(self, path):
+    def _allocate_data(self, batch: dict):
         raise NotImplementedError
 

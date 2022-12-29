@@ -8,6 +8,51 @@ from model.net.base_net import BaseNet
 from model.net.davae_utils import *
 
 
+class Image2AvatarVAE(nn.Module):
+    def __init__(
+        self,
+        im_size=512,
+        tex_size=1024,
+        mesh_inp_size=21918,
+        n_latent=256,
+        n_cams=38,
+        res=False,
+        non=False,
+        bilinear=False,
+    ):
+        super(Image2AvatarVAE, self).__init__()
+        z_dim = n_latent
+        self.enc = DomainAdaptationEncoder(
+            im_size, n_latent=z_dim, res=res
+        )
+        self.mean_map = LinearWN(256, 256)
+        self.logstd_map = LinearWN(256, 256)
+
+        self.dec = DeepAppearanceDecoder(
+            tex_size, mesh_inp_size, z_dim=z_dim, res=res, non=non, bilinear=bilinear
+        )
+        self.cc = ColorCorrection(n_cams)
+
+    def forward(self, up_face, low_face, view, cams=None):
+        b = up_face.size(0)
+        latent_mean, latent_logstd = self.enc(up_face, low_face)
+        mean = self.mean_map(latent_mean)
+        logstd = self.logstd_map(latent_logstd)
+
+        mean = mean * 0.1
+        logstd = logstd * 0.01
+        kl = 0.5 * torch.mean(torch.exp(2 * logstd) + mean**2 - 1.0 - 2 * logstd)
+        std = torch.exp(logstd)
+        eps = torch.randn_like(mean)
+        z = mean + std * eps
+
+        pred_tex, pred_mesh = self.dec(z, view)
+        pred_mesh = pred_mesh.view((b, -1, 3))
+        if cams is not None:
+            pred_tex = self.cc(pred_tex, cams)
+        return pred_tex, pred_mesh, kl
+
+
 class DomainAdaptationVAE2(nn.Module):
     def __init__(
         self,

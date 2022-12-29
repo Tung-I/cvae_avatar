@@ -1,0 +1,49 @@
+main:
+    random_seed: 0
+    saved_dir: '/home/tungi/cvae_avatar/output'
+    encoder_path: './saved/adapt2/checkpoints/model_28.pth'
+    decoder_path: './saved/davae/checkpoints/model_32.pth'
+
+dataset:
+    name: 'Image2AvatarDataset'
+    kwargs:
+        base_dir: '/home/tungi/datasets/mf_individuals'
+        im_size: 512
+        tex_size: 1024
+            
+dataloader:
+    name: 'VanillaDataLoader'
+    kwargs:
+        batch_size: 1
+        shuffle: false
+        num_workers: 0
+
+net: 
+    name: 'Image2AvatarVAE'
+    kwargs:
+        im_size: 512
+        tex_size: 1024
+        mesh_inp_size: 21918
+        n_latent: 256
+        res: true
+
+# decoder:
+#     name: 'DeepAppearanceVAE'
+#     kwargs:
+#         tex_size: 1024
+#         mesh_inp_size: 21918
+#         n_latent: 256
+#         res: true
+
+# encoder:
+#     name: 'DomainAdaptationVAE2'
+#     kwargs:
+#         im_size: 512
+#         n_latent: 256
+#         res: true
+
+predictor:
+    name: 'Image2AvatarPredictor'
+    kwargs:
+        resolution: [2048, 1334]        
+        device: 'cuda:0'
