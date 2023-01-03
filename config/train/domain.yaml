@@ -1,6 +1,7 @@
 main:
     random_seed: 0
     saved_dir: './saved/domain_adapt'
+    encoder_path: "./saved/davae/checkpoints/model_32.pth"
 
 dataset:
     name: 'DomainAdaptiveDataset'
@@ -8,12 +9,12 @@ dataset:
         base_dir: '/home/tungi/datasets/mf_individuals'
         im_size: 512
         tex_size: 1024
-        debug: true
+        debug: false
             
 dataloader:
     name: 'VanillaDataLoader'
     kwargs:
-        train_batch_size: 4
+        train_batch_size: 8
         valid_batch_size: 1
         shuffle: true
         num_workers: 8
@@ -32,7 +33,7 @@ encoder:
         mesh_inp_size: 21918
         n_latent: 256
         res: true
-    path: "./saved/davae/checkpoints/model_32.pth"
+        n_cams: 39
         
 optimizer:
     name: 'Adam'
@@ -48,7 +49,7 @@ lr_scheduler:
         gamma: 0.95
 
 logger:
-    name: 'DomainAdaptationLogger'
+    name: 'DomainAdaptiveLogger'
     kwargs:
         dummy_input: [16, 1, 128, 128]
 
@@ -61,10 +62,10 @@ monitor:
         early_stop: 0
 
 trainer:
-    name: 'DomainAdaptationTrainer2'
+    name: 'DomainAdaptiveTrainer'
     kwargs:
         lambda_retar: 1.0
         lambda_rec: 1.0
         lambda_kl: 0.1 
         device: 'cuda:0'
-        num_epochs: 36
+        num_epochs: 48

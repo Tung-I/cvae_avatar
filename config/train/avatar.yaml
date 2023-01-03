@@ -24,6 +24,7 @@ net:
         mesh_inp_size: 21918
         n_latent: 256
         res: true
+        n_cams: 39
         
 optimizer:
     name: 'Adam'

@@ -62,11 +62,11 @@ def main(args):
     lr_scheduler = _get_instance(torch.optim.lr_scheduler, config.lr_scheduler, optimizer) if config.get('lr_scheduler') else None
 
     # pretrained encoder
-    pretrained_path = config.encoder.pop('path')
+    pretrained_encoder_path = config.main.encoder_path
     config.encoder.kwargs.update(n_cams=n_cameras)
     encoder = _get_instance(model.net, config.encoder)
-    logging.info(f'Load the pretrained encoder weights from "{pretrained_path}".')
-    pretrained_dict = torch.load(pretrained_path)['net']
+    logging.info(f'Load the pretrained encoder weights from "{pretrained_encoder_path}".')
+    pretrained_dict = torch.load(pretrained_encoder_path)['net']
     encoder.load_state_dict(pretrained_dict)
     encoder = encoder.to(device).eval()
     for param in encoder.parameters():

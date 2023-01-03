@@ -43,8 +43,6 @@ def main(args):
     config.dataset.kwargs.update(base_dir=base_dir, type='valid')
     valid_dataset = _get_instance(data.dataset, config.dataset)
 
-    n_cameras = len(train_dataset.cameras)
-
     # dataloaders
     logging.info('Create the training and validation dataloaders.')
     train_batch_size, valid_batch_size = config.dataloader.kwargs.pop('train_batch_size'), config.dataloader.kwargs.pop('valid_batch_size')
@@ -55,7 +53,6 @@ def main(args):
 
     # model
     logging.info('Create the network architecture.')
-    config.net.kwargs.update(n_cams=n_cameras)
     net = _get_instance(model.net, config.net)
     logging.info('Create the optimizer.')
     optimizer = _get_instance(torch.optim, config.optimizer, net.get_model_params())
