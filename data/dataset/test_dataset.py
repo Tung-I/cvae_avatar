@@ -15,32 +15,29 @@ from data.dataset import BaseDataset
 from data.dataset.utils import *
 
 
-individual = 'm--20181017--0000--002914589--GHS'
-target_exp = 'E057_Cheeks_Puffed'
-target_cam = '400063'
+target_entity = 'm--20181017--0000--002914589--GHS'
+input_cam = '400048'
+target_exps = ['E008_Smile_Mouth_Closed', 'E019_Frown', 'E057_Cheeks_Puffed', 'E028_Scream_Eyebrows_Up', 'E074_Blink']
+target_cam = '400016'
 
 
-class InferDataset(BaseDataset):
+class TestDataset(BaseDataset):
     def __init__(
         self,
+        im_size=512,
         tex_size=1024,
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base_dir = '{}/{}'.format(str(self.base_dir), individual)
+        self.base_dir = '{}/{}'.format(str(self.base_dir), target_entity)
+        self.im_size = im_size
         self.tex_size = tex_size
-
-        self.target_individual = individual
-        self.target_exp = target_exp
-        self.target_cam = target_cam
 
         self.uvpath = "{}/unwrapped_uv_1024".format(self.base_dir)
         self.meshpath = "{}/tracked_mesh".format(self.base_dir)
         self.photopath = "{}/images".format(self.base_dir)
         self.krt_path = "{}/KRT".format(self.base_dir)
         self.camera_ids = {}
-        self.expressions = [str(x.parts[-1]) for x in Path(self.meshpath).iterdir() if x.is_dir()]
-        self.expressions.sort()
 
         check_path(self.uvpath)
         check_path(self.meshpath)
@@ -56,17 +53,18 @@ class InferDataset(BaseDataset):
 
         # load train list (but check that images are not dropped!)
         self.framelist = []
-    
-        files = list(Path("{}/{}".format(self.meshpath, target_exp)).glob("*.bin"))
-        frame_nums = [str(f.parts[-1]).split('.')[0] for f in files]
-        frame_nums.sort()
-        for n in frame_nums:
-            avgf = "{}/{}/average/{}.png".format(self.uvpath, target_exp, n)
-            if os.path.isfile(avgf) is not True:
-                continue
-            path = "{}/{}/{}/{}.png".format(self.uvpath, target_exp, target_cam, n)
-            if os.path.isfile(path) is True:
-                self.framelist.append((target_exp, target_cam, n))
+        for target_exp in target_exps:
+            files = list(Path("{}/{}".format(self.meshpath, target_exp)).glob("*.bin"))
+            frame_nums = [str(f.parts[-1]).split('.')[0] for f in files]
+            frame_nums.sort()
+            for n in frame_nums:
+                avgf = "{}/{}/average/{}.png".format(self.uvpath, target_exp, n)
+                if os.path.isfile(avgf) is not True:
+                    continue
+                path = "{}/{}/{}/{}.png".format(self.uvpath, target_exp, target_cam, n)
+                if os.path.isfile(path) is not True:
+                    continue
+                self.framelist.append((target_exp, n))
 
         # compute the view directions
         campos = {}
@@ -93,36 +91,27 @@ class InferDataset(BaseDataset):
 
 
     def __getitem__(self, idx):
-        exp, cam, frame = self.framelist[idx]
-        cam_id = self.camera_ids[cam]
+        target_exp, frame = self.framelist[idx]
+        cam_id = self.camera_ids[target_cam]
 
-        # geometry
-        path = "{}/{}/{}.obj".format(self.meshpath, exp, frame)
+        # target mesh topology
+        path = "{}/{}/{}.obj".format(self.meshpath, target_exp, frame)
         obj = load_obj(path)
         self.mesh_topology = obj
 
-        # geometry
-        path = "{}/{}/{}.bin".format(self.meshpath, exp, frame)
+        # target mesh vertex coordinates
+        path = "{}/{}/{}.bin".format(self.meshpath, target_exp, frame)
         verts = np.fromfile(path, dtype=np.float32)
         verts -= self.vertmean
         verts /= self.vertstd
 
-        # average image
-        path = "{}/{}/average/{}.png".format(self.uvpath, exp, frame)
-        avgtex = np.asarray(Image.open(path), dtype=np.float32)[::-1, ...]
-        mask = avgtex == 0
-        avgtex -= self.texmean
-        avgtex /= self.texstd
-        avgtex[mask] = 0.0
-        avgtex = cv2.resize(avgtex, (self.tex_size, self.tex_size)).transpose((2, 0, 1))
-
-        # image
-        path = "{}/{}/{}/{}.png".format(self.photopath, exp, cam, frame)
+        # target image
+        path = "{}/{}/{}/{}.png".format(self.photopath, target_exp, target_cam, frame)
         photo = np.asarray(Image.open(path), dtype=np.float32)
         photo = photo / 255.0
 
-        # texture
-        path = "{}/{}/{}/{}.png".format(self.uvpath, exp, cam, frame)
+        # target texture
+        path = "{}/{}/{}/{}.png".format(self.uvpath, target_exp, target_cam, frame)
         tex = np.asarray(Image.open(path), dtype=np.float32)[::-1, ...]
         mask = tex == 0
         tex -= self.texmean
@@ -133,16 +122,16 @@ class InferDataset(BaseDataset):
             mask.astype(np.float32), (self.tex_size, self.tex_size)
         ).transpose((2, 0, 1))
 
-        # view direction
+        # input view direction
         transf = np.genfromtxt(
-            "{}/{}/{}_transform.txt".format(self.meshpath, exp, frame)
+            "{}/{}/{}_transform.txt".format(self.meshpath, target_exp, frame)
         )
         R_f = transf[:3, :3]
         t_f = transf[:3, 3]
-        campos = np.dot(R_f.T, self.campos[cam] - t_f).astype(np.float32)
+        campos = np.dot(R_f.T, self.campos[target_cam] - t_f).astype(np.float32)
         view = campos / np.linalg.norm(campos)
 
-        extrin, intrin = self.krt[cam]["extrin"], self.krt[cam]["intrin"]
+        extrin, intrin = self.krt[target_cam]["extrin"], self.krt[target_cam]["intrin"]
         R_C = extrin[:3, :3]
         t_C = extrin[:3, 3]
         camrot = np.dot(R_C, R_f).astype(np.float32)
@@ -151,6 +140,14 @@ class InferDataset(BaseDataset):
 
         M = intrin @ np.hstack((camrot, camt[None].T))
 
+        # input image
+        path = "{}/{}/{}/{}.png".format(self.photopath, target_exp, input_cam, frame)
+        input_photo = np.asarray(Image.open(path), dtype=np.float32) / 255.
+        up_face = input_photo[640:640+600, 240:240+600]
+        up_face = cv2.resize(up_face, (self.im_size, self.im_size)).transpose((2, 0, 1))
+        low_face = input_photo[1024:1024+512, 280:280+512]
+        low_face = cv2.resize(low_face, (self.im_size, self.im_size)).transpose((2, 0, 1))
+
 
         return {
             "cam": cam_id,
@@ -158,9 +155,10 @@ class InferDataset(BaseDataset):
             "uvs": self.mesh_topology["uvs"],
             "vert_ids": self.mesh_topology["vert_ids"],
             "uv_ids": self.mesh_topology["uv_ids"],
-            "avg_tex": avgtex,
             "tex": tex,
             "view": view,
-            "aligned_verts": verts.reshape((-1, 3)).astype(np.float32),
+            "gt_verts": verts.reshape((-1, 3)).astype(np.float32),
+            "up_face": up_face,
+            "low_face": low_face,
             "photo": photo
         }

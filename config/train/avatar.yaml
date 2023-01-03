@@ -1,12 +1,11 @@
 main:
     random_seed: 0
-    saved_dir: './saved/da'
+    saved_dir: './saved/deep_avatar'
 
 dataset:
-    name: 'DomainAdaptationDataset'
+    name: 'DeepAvatarDataset'
     kwargs:
         base_dir: '/home/tungi/datasets/mf_individuals'
-        im_size: 512
         tex_size: 1024
         debug: false
             
@@ -19,20 +18,12 @@ dataloader:
         num_workers: 8
 
 net:
-    name: 'DomainAdaptationVAE'
-    kwargs:
-        im_size: 512
-        n_latent: 256
-        res: true
-
-encoder:
-    name: 'DeepAppearanceVAE'
+    name: 'DeepAvatarVAE'
     kwargs:
         tex_size: 1024
         mesh_inp_size: 21918
         n_latent: 256
         res: true
-    path: "./saved/davae/checkpoints/model_32.pth"
         
 optimizer:
     name: 'Adam'
@@ -48,7 +39,7 @@ lr_scheduler:
         gamma: 0.95
 
 logger:
-    name: 'DomainAdaptationLogger'
+    name: 'DeepAvatarLogger'
     kwargs:
         dummy_input: [16, 1, 128, 128]
 
@@ -61,10 +52,13 @@ monitor:
         early_stop: 0
 
 trainer:
-    name: 'DomainAdaptationTrainer'
+    name: 'DeepAvatarTrainer'
     kwargs:
-        lambda_retar: 0.1
-        lambda_rec: 1.0
-        lambda_kl: 0.1 
+        tex_size: 1024
+        resolution: [2048, 1334]
+        lambda_verts: 1.0
+        lambda_tex: 1.0
+        lambda_screen: 1.0
+        lambda_kl: 0.01 
         device: 'cuda:0'
-        num_epochs: 24
+        num_epochs: 48

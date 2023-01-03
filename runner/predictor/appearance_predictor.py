@@ -15,7 +15,14 @@ from runner.predictor import BasePredictor
 from runner.utils import Renderer
 
 
-class Image2AvatarPredictor(BasePredictor):
+class DeepAppearancePredictor(BasePredictor):
+    """
+    Predictor of Deep Appearance Models
+    Args:
+        resolution: Size of screen rendering
+        test_dataset: The pytorch dataset of testing
+        net: The well-trained deep appearance model
+    """ 
     def __init__(
         self,
         resolution,
@@ -25,7 +32,7 @@ class Image2AvatarPredictor(BasePredictor):
     ):
         super().__init__(**kwargs)
         self.test_dataset = test_dataset
-        self.net = net
+        self.net = net.to(device)
         self.renderer = Renderer(self.device)
         self.resolution = resolution
         self.avg_infer_time = None
@@ -75,7 +82,7 @@ class Image2AvatarPredictor(BasePredictor):
             if count > 0:
                 total_infer_time += time.time() - time_flag
 
-            # gt_screen & pred_screen
+            # save the gt_screen & pred_screen
             pred_tex = torch.clamp(pred_tex*255, 0, 255)
             gt_screen = batch["photo"] * 255
             pred_screen = torch.clamp(pred_screen*255, 0, 255)
@@ -84,7 +91,7 @@ class Image2AvatarPredictor(BasePredictor):
             gt_frames.append(gt_screen)
             pred_frames.append(pred_screen)
             
-            # input
+            # save the input
             up_face = batch['up_face'] * 255
             up_face = up_face.squeeze().permute(1, 2, 0).cpu().numpy().astype(np.uint8)
             upface_frames.append(up_face)

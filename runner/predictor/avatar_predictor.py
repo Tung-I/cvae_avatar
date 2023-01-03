@@ -15,12 +15,21 @@ from runner.predictor import BasePredictor
 from runner.utils import Renderer
 
 
-class DAVAEPredictor(BasePredictor):
+class DeepAvatarPredictor(BasePredictor):
+    """
+    Predictor of Deep-Avatar VAE
+    Args:
+        tex_size: Size of unwrapped textures
+        resolution: Size of screen rendering
+        test_dataset: The pytorch dataset of testing
+        net: The well-trained deep avatar VAE
+    """ 
     def __init__(
         self,
         tex_size,
         resolution,
         test_dataset, 
+        net,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -49,7 +58,7 @@ class DAVAEPredictor(BasePredictor):
         trange = tqdm(dataloader,
                       total=len(dataloader),
                       desc='test')
-        # infer
+
         gt_frames = []
         pred_frames = []
         avgtex_frames = []
@@ -73,20 +82,21 @@ class DAVAEPredictor(BasePredictor):
                 pred_tex = (pred_tex * texstd + texmean) / 255.0
                 gt_tex = (gt_tex * texstd + texmean) / 255.0
 
-                # pred_screen, rast_out = self.renderer.render(
-                #     batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
-                # )
-                avg_tex = batch["avg_tex"]
-                avg_tex = (avg_tex * texstd + texmean) / 255.0
                 pred_screen, rast_out = self.renderer.render(
-                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], avg_tex, self.resolution
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
                 )
+
+                # avg_tex = batch["avg_tex"]
+                # avg_tex = (avg_tex * texstd + texmean) / 255.0
+                # pred_screen, rast_out = self.renderer.render(
+                #     batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], avg_tex, self.resolution
+                # )
 
 
             if count > 0:
                 total_infer_time += time.time() - time_flag
 
-            # gt_screen & pred_screen
+            # logging
             gt_tex *= 255
             pred_tex = torch.clamp(pred_tex*255, 0, 255)
             gt_screen = batch["photo"] * 255
@@ -96,7 +106,6 @@ class DAVAEPredictor(BasePredictor):
             gt_frames.append(gt_screen)
             pred_frames.append(pred_screen)
             
-            # avg tex
             avg_tex = batch["avg_tex"]
             # mask = avg_tex == 0
             avg_tex = (avg_tex * texstd + texmean)

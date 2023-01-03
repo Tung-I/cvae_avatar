@@ -1,3 +1,3 @@
 from .base_predictor import BasePredictor
-from .davae_predictor import DAVAEPredictor
-from .i2a_predictor import Image2AvatarPredictor
+from .avatar_predictor import DeepAvatarPredictor
+from .appearance_predictor import DeepAppearancePredictor

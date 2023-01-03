@@ -15,21 +15,23 @@ from data.dataset import BaseDataset
 from data.dataset.utils import *
 
 
-individual = 'm--20181017--0000--002914589--GHS'
+entity = 'm--20181017--0000--002914589--GHS'
 cam_not_use = ['400008', '400006', '400007', '400010', '400015', '400031', '400037', '400053', '400055', '400059', '400025', '400041']
+input_cam = '400048'
 
 
-class MFINDDataset(BaseDataset):
+class DomainAdaptiveDataset(BaseDataset):
     def __init__(
         self,
+        im_size=512,
         tex_size=1024,
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base_dir = '{}/{}'.format(str(self.base_dir), individual)
+        self.base_dir = '{}/{}'.format(str(self.base_dir), entity)
+        self.im_size = im_size
         self.tex_size = tex_size
 
-        self.maskpath = "./loss_weight_mask.png"
         self.uvpath = "{}/unwrapped_uv_1024".format(self.base_dir)
         self.meshpath = "{}/tracked_mesh".format(self.base_dir)
         self.photopath = "{}/images".format(self.base_dir)
@@ -68,19 +70,8 @@ class MFINDDataset(BaseDataset):
                         if cam not in cam_not_use:
                             self.framelist.append((ep, cam, n))
 
-                # for i, cam in enumerate(self.cameras):
-                #     path = "{}/{}/{}/{}.png".format(self.uvpath, ep, cam, n)
-                #     if os.path.isfile(path) is True:
-                #         if self.type == 'train' and cam not in cam_valid:
-                #             self.framelist.append((ep, cam, n))
-                #         elif self.type =='valid' and cam in cam_valid:
-                #             self.framelist.append((ep, cam, n))
-                #         else:
-                #             continue
-                
 
-
-        # compute view directions of each camera
+        # compute the view direction of each camera
         campos = {}
         for cam in self.cameras:
             extrin = krt[cam]["extrin"]
@@ -98,18 +89,13 @@ class MFINDDataset(BaseDataset):
             "{}/vert_mean.bin".format(self.base_dir), dtype=np.float32
         )
         self.vertstd = float(np.genfromtxt("{}/vert_var.txt".format(self.base_dir)) ** 0.5)
-
-        # weight mask
-        self.loss_weight_mask = cv2.flip(cv2.imread(self.maskpath), 0)
-        self.loss_weight_mask = self.loss_weight_mask / self.loss_weight_mask.max()
-        
             
         # sampling for validation and debugging
         if self.type=='valid':
             random.seed(0)
-            self.framelist = random.sample(self.framelist, 400)
+            self.framelist = random.sample(self.framelist, 1000)
         if self.debug:
-            self.framelist = random.sample(self.framelist, 40)
+            self.framelist = random.sample(self.framelist, 48)
 
 
     def __len__(self):
@@ -140,56 +126,18 @@ class MFINDDataset(BaseDataset):
         avgtex[mask] = 0.0
         avgtex = cv2.resize(avgtex, (self.tex_size, self.tex_size)).transpose((2, 0, 1))
 
-        # image
-        path = "{}/{}/{}/{}.png".format(self.photopath, ep, cam, frame)
-        photo = np.asarray(Image.open(path), dtype=np.float32)
-        photo = photo / 255.0
-
-        # texture
-        path = "{}/{}/{}/{}.png".format(self.uvpath, ep, cam, frame)
-        tex = np.asarray(Image.open(path), dtype=np.float32)[::-1, ...]
-        mask = tex == 0
-        tex -= self.texmean
-        tex /= self.texstd
-        tex[mask] = 0.0
-        tex = cv2.resize(tex, (self.tex_size, self.tex_size)).transpose((2, 0, 1))
-        mask = 1.0 - cv2.resize(
-            mask.astype(np.float32), (self.tex_size, self.tex_size)
-        ).transpose((2, 0, 1))
-
-        # view direction
-        transf = np.genfromtxt(
-            "{}/{}/{}_transform.txt".format(self.meshpath, ep, frame)
-        )
-        R_f = transf[:3, :3]
-        t_f = transf[:3, 3]
-        campos = np.dot(R_f.T, self.campos[cam] - t_f).astype(np.float32)
-        view = campos / np.linalg.norm(campos)
-
-        extrin, intrin = self.krt[cam]["extrin"], self.krt[cam]["intrin"]
-        R_C = extrin[:3, :3]
-        t_C = extrin[:3, 3]
-        camrot = np.dot(R_C, R_f).astype(np.float32)
-        camt = np.dot(R_C, t_f) + t_C
-        camt = camt.astype(np.float32)
-
-        M = intrin @ np.hstack((camrot, camt[None].T))
-
+        # input face image
+        path = "{}/{}/{}/{}.png".format(self.photopath, ep, '400048', frame)
+        photo = np.asarray(Image.open(path), dtype=np.float32) / 255.
+        up_face = photo[640:640+600, 240:240+600]
+        up_face = cv2.resize(up_face, (self.im_size, self.im_size)).transpose((2, 0, 1))
+        low_face = photo[1024:1024+512, 280:280+512]
+        low_face = cv2.resize(low_face, (self.im_size, self.im_size)).transpose((2, 0, 1))
 
         return {
-            # "cam_idx": cam,
-            # "frame": frame,
-            # "exp": ep,
-            "cam": cam_id,
-            "M": M.astype(np.float32),
-            "uvs": self.mesh_topology["uvs"],
-            "vert_ids": self.mesh_topology["vert_ids"],
-            "uv_ids": self.mesh_topology["uv_ids"],
             "avg_tex": avgtex,
             "mask": mask,
-            "tex": tex,
-            "view": view,
-            # "transf": transf.astype(np.float32),
             "aligned_verts": verts.reshape((-1, 3)).astype(np.float32),
-            "photo": photo
+            "up_face": up_face,
+            "low_face": low_face
         }

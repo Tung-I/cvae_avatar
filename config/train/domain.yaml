@@ -1,14 +1,14 @@
 main:
     random_seed: 0
-    saved_dir: './saved/adapt2'
+    saved_dir: './saved/domain_adapt'
 
 dataset:
-    name: 'DomainAdaptationDataset'
+    name: 'DomainAdaptiveDataset'
     kwargs:
         base_dir: '/home/tungi/datasets/mf_individuals'
         im_size: 512
         tex_size: 1024
-        debug: false
+        debug: true
             
 dataloader:
     name: 'VanillaDataLoader'
@@ -19,14 +19,14 @@ dataloader:
         num_workers: 8
 
 net:
-    name: 'DomainAdaptationVAE2'
+    name: 'DomainAdaptiveVAE'
     kwargs:
         im_size: 512
         n_latent: 256
         res: true
 
 encoder:
-    name: 'DeepAppearanceVAE'
+    name: 'DeepAvatarVAE'
     kwargs:
         tex_size: 1024
         mesh_inp_size: 21918

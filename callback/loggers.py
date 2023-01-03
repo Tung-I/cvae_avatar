@@ -48,7 +48,10 @@ class BaseLogger:
         raise NotImplementedError
 
 
-class DomainAdaptationLogger(BaseLogger):
+class DomainAdaptiveLogger(BaseLogger):
+    """
+    Record the input and reconstructed images of each epoch
+    """
     def __init__(
         self,
         **kwargs
@@ -70,7 +73,10 @@ class DomainAdaptationLogger(BaseLogger):
         self.writer.add_image('train', train_grid, epoch)
 
 
-class DAVAELogger(BaseLogger):
+class DeepAvatarLogger(BaseLogger):
+    """
+    Record the inferred unwrapped texture and rendering of each epoch
+    """
     def __init__(
         self,
         **kwargs

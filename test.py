@@ -83,14 +83,16 @@ def main(args):
     logging.info('End inference.')
 
     # save video
-    save_path = "{}/{}".format(saved_dir, 'gt.mp4')
-    imageio.mimwrite(save_path, gt_frames, fps=30, quality=8)
+
     save_path = "{}/{}".format(saved_dir, 'output.mp4')
     imageio.mimwrite(save_path, pred_frames, fps=30, quality=8)
-    save_path = "{}/{}".format(saved_dir, 'input1.mp4')
-    imageio.mimwrite(save_path, upface_frames, fps=30, quality=8)
-    save_path = "{}/{}".format(saved_dir, 'input2.mp4')
-    imageio.mimwrite(save_path, lowface_frames, fps=30, quality=8)
+    save_path = "{}/{}".format(saved_dir, 'gt.mp4')
+    imageio.mimwrite(save_path, gt_frames, fps=30, quality=8)
+
+    # save_path = "{}/{}".format(saved_dir, 'input1.mp4')
+    # imageio.mimwrite(save_path, upface_frames, fps=30, quality=8)
+    # save_path = "{}/{}".format(saved_dir, 'input2.mp4')
+    # imageio.mimwrite(save_path, lowface_frames, fps=30, quality=8)
 
 
 def _get_instance(module, config, *args):

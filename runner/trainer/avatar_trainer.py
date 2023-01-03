@@ -14,25 +14,43 @@ from runner.trainer import BaseTrainer
 from runner.utils import Renderer
 
 
-class DomainAdaptationTrainer(BaseTrainer):
+class DeepAvatarTrainer(BaseTrainer):
+    """
+    Trainer of Deep-Avatar VAE
+    Args:
+        tex_size: Size of unwrapped textures
+        resolution: Size of screen rendering
+        train_dataset: The pytorch dataset of training 
+        valid_dataset: The pytorch dataset of validation
+        lambda_screen: The weight of screen rendering loss
+        lambda_tex: The weight of texture reconstruction loss
+        lambda_verts: The weight of mesh reconstruction loss
+        lambda_kl: The weight of kl-divergence loss
+    """ 
     def __init__(
         self,
-        pretrained_enc,
+        tex_size,
+        resolution,
         train_dataset, 
         valid_dataset,
-        lambda_retar=0.1,
-        lambda_rec=1.0,
-        lambda_kl=0.1,
+        lambda_screen=1.0,
+        lambda_tex=1.0,
+        lambda_verts=1.0,
+        lambda_kl=1e-2,
         **kwargs
     ):
         super().__init__(**kwargs)
+        self.tex_size = tex_size
         self.mse = nn.MSELoss()
-        self.pretrained_enc = pretrained_enc
         self.train_dataset = train_dataset
-        self.valid_dataset = valid_dataset    
-        self.lambda_retar = lambda_retar
-        self.lambda_rec = lambda_rec
+        self.valid_dataset = valid_dataset
+        self.renderer = Renderer(self.device)
+        self.resolution = resolution
+        self.lambda_verts = lambda_verts
+        self.lambda_tex = lambda_tex
+        self.lambda_screen = lambda_screen
         self.lambda_kl = lambda_kl 
+        self.optimizer_cc = optim.Adam(self.net.get_cc_params(), 3e-4, (0.9, 0.999))
     
 
     def train(self):
@@ -101,76 +119,110 @@ class DomainAdaptationTrainer(BaseTrainer):
         for batch in trange:
             batch = self._allocate_data(batch)
             batch_size, channel, height, width = batch["avg_tex"].shape
- 
+            gt_tex = batch["tex"]
+
+            # parameters for denormalization
             vertmean = torch.tensor(dataset.vertmean, dtype=torch.float32).view((1, -1, 3))
             vertmean = vertmean.to(self.device)
             vertstd = dataset.vertstd
             texmean = torch.tensor(dataset.texmean).permute((2, 0, 1))[None, ...]
             texmean = texmean.to(self.device)
             texstd = dataset.texstd
+            loss_weight_mask = torch.tensor(dataset.loss_weight_mask).permute(2, 0, 1).unsqueeze(0).float()
+            loss_weight_mask = loss_weight_mask.to(self.device)
 
+            # training
             if mode == 'training':
-                up_face, low_face, kl, mapped_z = self.net(batch['up_face'], batch['low_face'])
+                pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cam"])
                 # compute loss
-                z = self.pretrained_enc.get_latent(batch["avg_tex"], batch["aligned_verts"])
-                retar_loss = self.mse(z, mapped_z)
-                rec_loss = (
-                    torch.mean((up_face - batch["up_face"]) ** 2) + torch.mean((low_face - batch["low_face"]) ** 2)
-                ) * (255**2) * 0.5
+                vert_loss = self.mse(pred_verts, batch["aligned_verts"])
+                pred_verts = pred_verts * vertstd + vertmean
+                pred_tex = (pred_tex * texstd + texmean) / 255.0
+                gt_tex = (gt_tex * texstd + texmean) / 255.0
+                loss_mask = loss_weight_mask.repeat(batch_size, 1, 1, 1)
+                tex_loss = self.mse(pred_tex * batch["mask"], gt_tex * batch["mask"]) * (255**2) / (texstd**2)
+                screen_mask, rast_out = self.renderer.render(
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], loss_mask, self.resolution
+                )
+                pred_screen, rast_out = self.renderer.render(
+                    batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                )
+                screen_loss = (
+                    torch.mean((pred_screen - batch["photo"]) ** 2 * screen_mask)
+                    * (255**2)
+                    / (texstd**2)
+                )
                 total_loss = (
-                    self.lambda_rec * rec_loss +
-                    self.lambda_retar * retar_loss +
+                    self.lambda_verts * vert_loss +
+                    self.lambda_tex * tex_loss +
+                    self.lambda_screen * screen_loss +
                     self.lambda_kl * kl
                 )
 
                 # loss backward
                 self.optimizer.zero_grad()
+                self.optimizer_cc.zero_grad()
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), 10)
                 self.optimizer.step()
+                self.optimizer_cc.step()
 
+            # validation
             else:
                 with torch.no_grad():
-                    up_face, low_face, kl, mapped_z = self.net(batch['up_face'], batch['low_face'])
-                    z = self.pretrained_enc.get_latent(batch["avg_tex"], batch["aligned_verts"])
-                    retar_loss = self.mse(z, mapped_z)
-                    rec_loss = (
-                        torch.mean((up_face - batch["up_face"]) ** 2) + torch.mean((low_face - batch["low_face"]) ** 2)
-                    ) * (255**2) * 0.5
+                    pred_tex, pred_verts, kl = self.net(batch["avg_tex"], batch["aligned_verts"], batch["view"], cams=batch["cam"])
+                    # compute loss
+                    vert_loss = self.mse(pred_verts, batch["aligned_verts"])
+                    pred_verts = pred_verts * vertstd + vertmean
+                    pred_tex = (pred_tex * texstd + texmean) / 255.0
+                    gt_tex = (gt_tex * texstd + texmean) / 255.0
+                    loss_mask = loss_weight_mask.repeat(batch_size, 1, 1, 1)
+                    tex_loss = self.mse(pred_tex * batch["mask"], gt_tex * batch["mask"]) * (255**2) / (texstd**2)
+                    screen_mask, rast_out = self.renderer.render(
+                        batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], loss_mask, self.resolution
+                    )
+                    pred_screen, rast_out = self.renderer.render(
+                        batch["M"], pred_verts, batch["vert_ids"], batch["uvs"], batch["uv_ids"], pred_tex, self.resolution
+                    )
+                    screen_loss = (
+                        torch.mean((pred_screen - batch["photo"]) ** 2 * screen_mask)
+                        * (255**2)
+                        / (texstd**2)
+                    )
                     total_loss = (
-                        self.lambda_rec * rec_loss +
-                        self.lambda_retar * retar_loss +
+                        self.lambda_verts * vert_loss +
+                        self.lambda_tex * tex_loss +
+                        self.lambda_screen * screen_loss +
                         self.lambda_kl * kl
                     )
 
-            self._update_log(log, batch_size, total_loss, [retar_loss, rec_loss, kl])
+            self._update_log(log, batch_size, total_loss, [vert_loss, tex_loss, screen_loss, kl])
             count += batch_size
             trange.set_postfix(**dict((key, f'{value / count: .3f}') for key, value in log.items()))
         
-
+        # logging
         for key in log:
             log[key] /= count
 
-        up_face = torch.clamp(up_face*255, 0, 255)
-        low_face = torch.clamp(low_face*255, 0, 255)
+        gt_tex *= 255
+        pred_tex = torch.clamp(pred_tex*255, 0, 255)
+        gt_screen = batch["photo"] * 255
+        pred_screen = torch.clamp(pred_screen*255, 0, 255)
 
-        
         output = {
-            "up_face": batch["up_face"] * 255., 
-            "pred_up_face": up_face,
-            "low_face": batch["low_face"] * 255.,
-            "pred_low_face": low_face
+            "gt_tex": gt_tex, 
+            "pred_tex": pred_tex,
+            "gt_screen": gt_screen.permute(0, 3, 1, 2),
+            "pred_screen": pred_screen.permute(0, 3, 1, 2)
         }
 
         return log, output
 
     
-
-
     def _init_log(self):
         log = {}
         log['Loss'] = 0
-        for loss_name in ['retar_loss', 'rec_loss', 'kl_loss']:
+        for loss_name in ['vert_loss', 'tex_loss', 'screen_loss', 'kl_loss']:
             log[loss_name] = 0
         return log
 
@@ -183,7 +235,7 @@ class DomainAdaptationTrainer(BaseTrainer):
         losses: Sequence[torch.Tensor],
     ):
         log['Loss'] += total_loss.item() * batch_size
-        loss_names = ['retar_loss', 'rec_loss', 'kl_loss']
+        loss_names = ['vert_loss', 'tex_loss', 'screen_loss', 'kl_loss']
         for name, loss in zip(loss_names, losses):
             log[name] += loss.item() * batch_size
 
@@ -201,6 +253,7 @@ class DomainAdaptationTrainer(BaseTrainer):
         torch.save({
             'net': self.net.state_dict(),
             'optimizer': self.optimizer.state_dict(),
+            'optimizer_cc': self.optimizer_cc.state_dict(),
             'lr_scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler else None,
             'monitor': self.monitor,
             'epoch': self.epoch,
@@ -213,6 +266,7 @@ class DomainAdaptationTrainer(BaseTrainer):
         checkpoint = torch.load(path, map_location=self.device)
         self.net.load_state_dict(checkpoint['net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.optimizer_cc.load_state_dict(checkpoint['optimizer_cc'])
         if checkpoint['lr_scheduler']:
             self.lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         self.monitor = checkpoint['monitor']
