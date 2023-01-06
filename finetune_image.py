@@ -5,6 +5,7 @@ import sys
 import torch
 import random
 import yaml
+import imageio
 from box import Box
 from pathlib import Path
 
@@ -20,10 +21,7 @@ def main(args):
     saved_dir = Path(config.main.saved_dir)
     if not saved_dir.is_dir():
         saved_dir.mkdir(parents=True)
-    logging.info(f'Save the config to "{config.main.saved_dir}".')
-    with open(saved_dir / 'config.yaml', 'w+') as f:
-        yaml.dump(config.to_dict(), f, default_flow_style=False)
-
+    
     # Make experiment results deterministic.
     random.seed(config.main.random_seed)
     torch.manual_seed(random.getstate()[1][1])
@@ -33,7 +31,7 @@ def main(args):
 
     if not torch.cuda.is_available():
         raise RuntimeError("cuda unavailable.")
-    device = torch.device(config.trainer.kwargs.device)
+    device = torch.device(config.finetuner.kwargs.device)
 
     # datasets
     logging.info('Create the training and validation datasets.')
@@ -54,20 +52,26 @@ def main(args):
     # model
     logging.info('Create the network architecture.')
     net = _get_instance(model.net, config.net)
+    logging.info('Load the weights from {} and {}.'.format(config.main.encoder_path, config.main.decoder_path))
+    encoder_dict = torch.load(config.main.encoder_path)['net']
+    decoder_dict = torch.load(config.main.decoder_path)['net']
+    model_state_dict = net.state_dict()
+
+    for m in ['enc.', 'mean_map.', 'logstd_map.']:
+        params = {k: v for k, v in encoder_dict.items() if m in k}
+        model_state_dict.update(params)
+    for m in ['dec.', 'cc.']:
+        params = {k: v for k, v in decoder_dict.items() if m in k}
+        model_state_dict.update(params)
+
+    net.load_state_dict(model_state_dict)
+    net = net.to(device)
+
+    # optimizer
     logging.info('Create the optimizer.')
     optimizer = _get_instance(torch.optim, config.optimizer, net.get_model_params())
     logging.info('Create the learning rate scheduler.')
     lr_scheduler = _get_instance(torch.optim.lr_scheduler, config.lr_scheduler, optimizer) if config.get('lr_scheduler') else None
-
-    # pretrained encoder
-    pretrained_encoder_path = config.main.encoder_path
-    encoder = _get_instance(model.net, config.encoder)
-    logging.info(f'Load the pretrained encoder weights from "{pretrained_encoder_path}".')
-    pretrained_dict = torch.load(pretrained_encoder_path)['net']
-    encoder.load_state_dict(pretrained_dict)
-    encoder = encoder.to(device).eval()
-    for param in encoder.parameters():
-        param.requires_grad = False
 
     # logger & monitor
     logging.info('Create the logger.')
@@ -77,34 +81,25 @@ def main(args):
     config.monitor.kwargs.update(checkpoints_dir=saved_dir / 'checkpoints')
     monitor = _get_instance(callback.monitor, config.monitor)
 
-    # trainer
-    logging.info('Create the trainer.')
-    kwargs = {
-        'device': device,
-        'train_dataloader': train_dataloader,
-        'valid_dataloader': valid_dataloader,
-        'train_dataset': train_dataset,
-        'valid_dataset': valid_dataset,
-        'net': net,
-        'optimizer': optimizer,
-        'lr_scheduler': lr_scheduler,
-        'logger': logger,
-        'monitor': monitor,
-        'pretrained_enc': encoder
-    }
-    config.trainer.kwargs.update(kwargs)
-    trainer = _get_instance(runner.trainer, config.trainer)
+    # finetuner
+    logging.info('Create the finetuner.')
+    kwargs = {'device': device,
+                'train_dataloader': train_dataloader,
+                'valid_dataloader': valid_dataloader,
+                'train_dataset': train_dataset,
+                'valid_dataset': valid_dataset,
+                'net': net,
+                'optimizer': optimizer,
+                'lr_scheduler': lr_scheduler,
+                'logger': logger,
+                'monitor': monitor}
+    config.finetuner.kwargs.update(kwargs)
+    finetuner = _get_instance(runner.finetuner, config.finetuner)
 
-    # training
-    loaded_path = config.main.get('loaded_path')
-    if loaded_path:
-        logging.info(f'Load the previous checkpoint from "{loaded_path}".')
-        trainer.load(Path(loaded_path))
-        logging.info('Resume training.')
-    else:
-        logging.info('Start training.')
-    trainer.train()
-    logging.info('End training.')
+    # finetuning
+    logging.info('Start finetuning.')
+    finetuner.train()
+    logging.info('End finetuning.')
 
 
 def _get_instance(module, config, *args):

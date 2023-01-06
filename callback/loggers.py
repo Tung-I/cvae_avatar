@@ -48,6 +48,29 @@ class BaseLogger:
         raise NotImplementedError
 
 
+class ImageFinetuneLogger(BaseLogger):
+    """
+    """
+    def __init__(
+        self,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+
+    def _add_images(
+        self,
+        epoch: int,
+        train_output: dict,
+        valid_output: dict
+    ):
+
+        train_gt_screen = make_grid(train_output['gt_screen'], nrow=1, normalize=True, scale_each=True, pad_value=1)
+        train_pred_screen = make_grid(train_output['pred_screen'], nrow=1, normalize=True, scale_each=True, pad_value=1)
+        train_grid_screen = torch.cat((train_gt_screen, train_pred_screen), dim=-1)
+        self.writer.add_image('train_screen', train_grid_screen, epoch)
+
+
+
 class DomainAdaptiveLogger(BaseLogger):
     """
     Record the input and reconstructed images of each epoch

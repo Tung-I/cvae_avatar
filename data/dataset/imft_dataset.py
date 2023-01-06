@@ -15,15 +15,13 @@ from data.dataset import BaseDataset
 from data.dataset.utils import *
 
 
-# target_entity = 'm--20181017--0000--002914589--GHS'
 target_entity = 'm--20180227--0000--6795937--GHS'
 input_cam = '400048'
-# target_exps = ['E008_Smile_Mouth_Closed']
 target_exps = ['E061_Lips_Puffed']
-target_cam = '400017'
+target_cam = '400016'
 
 
-class TestDataset(BaseDataset):
+class ImageFinetuneDataset(BaseDataset):
     def __init__(
         self,
         im_size=512,
@@ -35,6 +33,7 @@ class TestDataset(BaseDataset):
         self.im_size = im_size
         self.tex_size = tex_size
 
+        self.maskpath = "./loss_weight_mask.png"
         self.uvpath = "{}/unwrapped_uv_1024".format(self.base_dir)
         self.meshpath = "{}/tracked_mesh".format(self.base_dir)
         self.photopath = "{}/images".format(self.base_dir)
@@ -85,6 +84,15 @@ class TestDataset(BaseDataset):
             "{}/vert_mean.bin".format(self.base_dir), dtype=np.float32
         )
         self.vertstd = float(np.genfromtxt("{}/vert_var.txt".format(self.base_dir)) ** 0.5)
+
+        # weight mask
+        self.loss_weight_mask = cv2.flip(cv2.imread(self.maskpath), 0)
+        self.loss_weight_mask = self.loss_weight_mask / self.loss_weight_mask.max()
+
+        # sampling for validation and debugging
+        if self.type=='valid':
+            random.seed(0)
+            self.framelist = random.sample(self.framelist, 8)
 
 
 
@@ -159,9 +167,7 @@ class TestDataset(BaseDataset):
             "uvs": self.mesh_topology["uvs"],
             "vert_ids": self.mesh_topology["vert_ids"],
             "uv_ids": self.mesh_topology["uv_ids"],
-            "tex": tex,
             "view": view,
-            "gt_verts": verts.reshape((-1, 3)).astype(np.float32),
             "up_face": up_face,
             "low_face": low_face,
             "photo": photo

@@ -1,11 +1,14 @@
 main:
     random_seed: 0
-    saved_dir: './saved/deep_avatar'
+    saved_dir: './saved/ft'
+    encoder_path: './saved/domain_adapt/checkpoints/model_best.pth'
+    decoder_path: './saved/deep_avatar/checkpoints/model_best.pth'
 
 dataset:
-    name: 'DeepAvatarDataset'
+    name: 'ImageFinetuneDataset'
     kwargs:
-        base_dir: '/home/tungi/datasets/mf_individuals'
+        base_dir: '/home/tungi/datasets/mf'
+        im_size: 512
         tex_size: 1024
         debug: false
             
@@ -17,9 +20,10 @@ dataloader:
         shuffle: true
         num_workers: 8
 
-net:
-    name: 'DeepAvatarVAE'
+net: 
+    name: 'DeepAppearanceModel'
     kwargs:
+        im_size: 512
         tex_size: 1024
         mesh_inp_size: 21918
         n_latent: 256
@@ -29,7 +33,7 @@ net:
 optimizer:
     name: 'Adam'
     kwargs:
-        lr: 0.0003
+        lr: 0.0001
         weight_decay: 0
         amsgrad: false
 
@@ -40,7 +44,7 @@ lr_scheduler:
         gamma: 0.95
 
 logger:
-    name: 'DeepAvatarLogger'
+    name: 'ImageFinetuneLogger'
     kwargs:
         dummy_input: [16, 1, 128, 128]
 
@@ -49,17 +53,14 @@ monitor:
     kwargs:
         mode: 'min'
         target: 'Loss'
-        saved_freq: 4
+        saved_freq: 8
         early_stop: 0
 
-trainer:
-    name: 'DeepAvatarTrainer'
+finetuner:
+    name: 'ImageFinetuner'
     kwargs:
-        tex_size: 1024
         resolution: [2048, 1334]
-        lambda_verts: 1.0
-        lambda_tex: 1.0
         lambda_screen: 1.0
         lambda_kl: 0.01 
         device: 'cuda:0'
-        num_epochs: 48
+        num_epochs: 24

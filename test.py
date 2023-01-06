@@ -38,7 +38,6 @@ def main(args):
     base_dir = Path(config.dataset.kwargs.base_dir)
     config.dataset.kwargs.update(base_dir=base_dir, type='test')
     test_dataset = _get_instance(data.dataset, config.dataset)
-    n_cameras = len(test_dataset.cameras)
 
     # dataloaders
     logging.info('Create the dataloader.')
@@ -48,7 +47,6 @@ def main(args):
 
     # model
     logging.info('Create the network architecture.')
-    config.net.kwargs.update(n_cams=n_cameras)
     net = _get_instance(model.net, config.net)
     logging.info('Load the weights from {} and {}.'.format(config.main.encoder_path, config.main.decoder_path))
     encoder_dict = torch.load(config.main.encoder_path)['net']
@@ -82,8 +80,7 @@ def main(args):
     print("Inference speed: {}".format(predictor.avg_infer_time))
     logging.info('End inference.')
 
-    # save video
-
+    # save videos
     save_path = "{}/{}".format(saved_dir, 'output.mp4')
     imageio.mimwrite(save_path, pred_frames, fps=30, quality=8)
     save_path = "{}/{}".format(saved_dir, 'gt.mp4')

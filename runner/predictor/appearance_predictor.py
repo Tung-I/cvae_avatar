@@ -32,7 +32,7 @@ class DeepAppearancePredictor(BasePredictor):
     ):
         super().__init__(**kwargs)
         self.test_dataset = test_dataset
-        self.net = net.to(device)
+        self.net = net.to(self.device)
         self.renderer = Renderer(self.device)
         self.resolution = resolution
         self.avg_infer_time = None

@@ -33,7 +33,7 @@ encoder:
         mesh_inp_size: 21918
         n_latent: 256
         res: true
-        n_cams: 39
+        n_cams: 42
         
 optimizer:
     name: 'Adam'

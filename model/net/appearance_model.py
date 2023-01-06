@@ -59,6 +59,14 @@ class DeepAppearanceModel(nn.Module):
             pred_tex = self.cc(pred_tex, cams)
         return pred_tex, pred_mesh, kl
 
+    def get_model_params(self):
+        params = []
+        params += list(self.enc.parameters())
+        params += list(self.dec.parameters())
+        params += list(self.mean_map.parameters())
+        params += list(self.logstd_map.parameters())
+        return params
+
 
 
 class DomainAdaptiveVAE(nn.Module):
