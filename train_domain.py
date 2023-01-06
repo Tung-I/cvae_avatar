@@ -43,8 +43,6 @@ def main(args):
     config.dataset.kwargs.update(base_dir=base_dir, type='valid')
     valid_dataset = _get_instance(data.dataset, config.dataset)
 
-    n_cameras = len(train_dataset.cameras)
-
     # dataloaders
     logging.info('Create the training and validation dataloaders.')
     train_batch_size, valid_batch_size = config.dataloader.kwargs.pop('train_batch_size'), config.dataloader.kwargs.pop('valid_batch_size')
@@ -63,7 +61,6 @@ def main(args):
 
     # pretrained encoder
     pretrained_encoder_path = config.main.encoder_path
-    config.encoder.kwargs.update(n_cams=n_cameras)
     encoder = _get_instance(model.net, config.encoder)
     logging.info(f'Load the pretrained encoder weights from "{pretrained_encoder_path}".')
     pretrained_dict = torch.load(pretrained_encoder_path)['net']

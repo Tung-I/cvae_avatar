@@ -1,0 +1,71 @@
+main:
+    random_seed: 0
+    saved_dir: './saved/domain_adapt'
+    encoder_path: "./saved/deep_avatar/checkpoints/model_best.pth"
+
+dataset:
+    name: 'DomainAdaptiveDataset'
+    kwargs:
+        base_dir: '/tmp2/tungi851230/datasets/mf_individuals'
+        im_size: 512
+        tex_size: 1024
+        debug: false
+            
+dataloader:
+    name: 'VanillaDataLoader'
+    kwargs:
+        train_batch_size: 12
+        valid_batch_size: 1
+        shuffle: true
+        num_workers: 8
+
+net:
+    name: 'DomainAdaptiveVAE'
+    kwargs:
+        im_size: 512
+        n_latent: 256
+        res: true
+
+encoder:
+    name: 'DeepAvatarVAE'
+    kwargs:
+        tex_size: 1024
+        mesh_inp_size: 21918
+        n_latent: 256
+        res: true
+        n_cams: 42
+        
+optimizer:
+    name: 'Adam'
+    kwargs:
+        lr: 0.0003
+        weight_decay: 0
+        amsgrad: false
+
+lr_scheduler:
+    name: StepLR
+    kwargs:
+        step_size: 1
+        gamma: 0.95
+
+logger:
+    name: 'DomainAdaptiveLogger'
+    kwargs:
+        dummy_input: [16, 1, 128, 128]
+
+monitor:
+    name: 'Monitor'
+    kwargs:
+        mode: 'min'
+        target: 'Loss'
+        saved_freq: 8
+        early_stop: 0
+
+trainer:
+    name: 'DomainAdaptiveTrainer'
+    kwargs:
+        lambda_retar: 1.0
+        lambda_rec: 1.0
+        lambda_kl: 0.1 
+        device: 'cuda:0'
+        num_epochs: 48
